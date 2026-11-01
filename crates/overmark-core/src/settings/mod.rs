@@ -119,6 +119,10 @@ pub struct DrawingSettings {
     pub disappearing_ink_seconds: f32,
     /// How long the laser pointer's trail lasts, in milliseconds.
     pub laser_trail_ms: u32,
+    /// Whether a mouse's right-click on the drawing undoes, as Ctrl+Z does. On by default: a
+    /// right-click there did nothing before, so it takes nothing away, and one by mistake is
+    /// undone again with Ctrl+Y.
+    pub right_click_undoes: bool,
 }
 
 /// The palette's length: eight fixed colours and one custom.
@@ -151,6 +155,7 @@ impl Default for DrawingSettings {
             disappearing_ink: false,
             disappearing_ink_seconds: 3.0,
             laser_trail_ms: 500,
+            right_click_undoes: true,
         }
     }
 }
@@ -787,6 +792,12 @@ impl Settings {
             ),
             "laser_trail_ms",
             &d.laser_trail_ms.to_string(),
+        );
+        w.key(
+            "A right-click on the drawing undoes, as Ctrl+Z does (default true). The mouse's right
+button only: a pen's barrel button and touch never undo.",
+            "right_click_undoes",
+            &d.right_click_undoes.to_string(),
         );
 
         w.blank();

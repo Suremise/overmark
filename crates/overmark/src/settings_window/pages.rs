@@ -700,6 +700,12 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             |v| tr!("settings-ms", ms = v.round() as u64),
         );
         d.laser_trail_ms = trail as u32;
+        setting_row(
+            ui,
+            &tr("settings-right-click-undoes"),
+            Some(&tr("settings-right-click-undoes-help")),
+            |ui| toggle(ui, &mut d.right_click_undoes),
+        );
     });
     ui.add_space(space::M);
     let b = &mut app.settings.backdrops;

@@ -502,6 +502,14 @@ impl Ink {
                 self.wheel(delta, settings);
                 None
             }
+            // The same undo as Ctrl+Z, when Settings allows it. Never while anything touches:
+            // mid-stroke (the left button held, or a pen or finger drawing) it would drop the
+            // stroke, so it does nothing then.
+            OverlayEvent::RightClick { .. }
+                if settings.right_click_undoes && self.contact.is_none() =>
+            {
+                self.command(Command::Undo, settings)
+            }
             _ => None,
         }
     }
@@ -1167,6 +1175,81 @@ mod tests {
             .iter()
             .map(|s| s.drawing().items().len())
             .collect()
+    }
+
+    fn right_click(ink: &mut Ink, settings: &DrawingSettings) {
+        ink.handle(OverlayEvent::RightClick { screen: 0 }, settings);
+    }
+
+    #[test]
+    fn a_right_click_undoes_one_step_as_ctrl_z_does() {
+        let mut ink = ink(1);
+        let s = DrawingSettings::default();
+        assert!(s.right_click_undoes, "on by default");
+        drag(&mut ink, 0, 100, false);
+        drag(&mut ink, 0, 200, false);
+        right_click(&mut ink, &s);
+        assert_eq!(counts(&ink), vec![1]);
+        // The same step Ctrl+Z takes: Ctrl+Y brings it back.
+        key(&mut ink, 'Y' as u32, true, false);
+        assert_eq!(counts(&ink), vec![2]);
+        right_click(&mut ink, &s);
+        right_click(&mut ink, &s);
+        assert_eq!(counts(&ink), vec![0]);
+        right_click(&mut ink, &s);
+        assert_eq!(counts(&ink), vec![0], "nothing left to undo");
+    }
+
+    #[test]
+    fn a_right_click_does_nothing_when_settings_turn_it_off() {
+        let mut ink = ink(1);
+        let off = DrawingSettings {
+            right_click_undoes: false,
+            ..DrawingSettings::default()
+        };
+        drag(&mut ink, 0, 100, false);
+        right_click(&mut ink, &off);
+        assert_eq!(counts(&ink), vec![1]);
+        assert_eq!(ink.sessions[0].undo_steps(), 1);
+    }
+
+    /// A right-click while the left button draws (or a pen or finger does) neither undoes nor
+    /// cuts the stroke: it goes on and ends whole, one step.
+    #[test]
+    fn a_right_click_mid_stroke_neither_undoes_nor_cuts_it() {
+        let mut ink = ink(1);
+        let s = DrawingSettings::default();
+        drag(&mut ink, 0, 50, false);
+        for eraser in [false, true] {
+            let before = counts(&ink)[0];
+            let ev = |phase, x, contact| OverlayEvent::Pointer {
+                screen: 0,
+                phase,
+                sample: sample(x, if eraser { 600 } else { 300 }, contact, eraser),
+                shift: false,
+            };
+            ink.handle(ev(Phase::Down, 100, true), &s);
+            ink.handle(ev(Phase::Move, 150, true), &s);
+            right_click(&mut ink, &s);
+            ink.handle(ev(Phase::Move, 200, true), &s);
+            ink.handle(ev(Phase::Up, 250, false), &s);
+            if eraser {
+                // The eraser crossed nothing at y 600: both strokes are still there.
+                assert_eq!(counts(&ink), vec![before]);
+            } else {
+                assert_eq!(counts(&ink), vec![before + 1]);
+                let points = ink.sessions[0]
+                    .drawing()
+                    .items()
+                    .last()
+                    .map(|i| i.points.len());
+                assert!(points.is_some_and(|n| n >= 3), "whole: {points:?}");
+            }
+        }
+        assert_eq!(counts(&ink), vec![2]);
+        // Once lifted, it undoes again.
+        right_click(&mut ink, &s);
+        assert_eq!(counts(&ink), vec![1]);
     }
 
     #[test]

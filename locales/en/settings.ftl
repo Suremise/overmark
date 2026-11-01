@@ -74,6 +74,8 @@ settings-seconds =
 settings-laser-trail = Laser trail length
 # $ms: a number of milliseconds.
 settings-ms = { $ms } ms
+settings-right-click-undoes = Right-click undoes
+settings-right-click-undoes-help = A right-click on the drawing undoes, as Ctrl+Z does. The mouse's right button only, not a pen's button or touch.
 
 ## Backdrops and guides
 

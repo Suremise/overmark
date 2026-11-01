@@ -6,6 +6,11 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- A right-click on the drawing undoes, as Ctrl+Z does (the mouse's right button only, never
+  mid-stroke). It's on by default; turn it off in Settings > Drawing.
+
 ### Fixed
 
 - The tray icon's tooltip stays after drawing: it went once the icon first changed (opening

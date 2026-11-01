@@ -2,15 +2,15 @@
 //! [`enable_mouse_in_pointer`], the mouse comes as pointer messages too, so one path handles
 //! all three. Each message can carry several coalesced samples (a pen reports at 200+ Hz, a
 //! mouse at up to 1 kHz); [`samples`] returns them all, oldest first, with the pen's pressure,
-//! tilt and whether it's the eraser end.
+//! tilt and whether it's the eraser end. [`right_button_down`] picks out a mouse's right-click.
 
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::WPARAM;
 use windows::Win32::UI::Input::Pointer::{
     EnableMouseInPointer, GetPointerInfo, GetPointerInfoHistory, GetPointerPenInfoHistory,
-    GetPointerType, POINTER_FLAG_FIRSTBUTTON, POINTER_FLAG_INCONTACT, POINTER_INFO,
-    POINTER_PEN_INFO,
+    GetPointerType, POINTER_BUTTON_CHANGE_TYPE, POINTER_CHANGE_SECONDBUTTON_DOWN,
+    POINTER_FLAG_FIRSTBUTTON, POINTER_FLAG_INCONTACT, POINTER_INFO, POINTER_PEN_INFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, POINTER_INPUT_TYPE,
@@ -134,6 +134,28 @@ pub fn samples(wparam: WPARAM) -> Vec<Sample> {
     }
 }
 
+/// Whether a `WM_POINTERDOWN` or `WM_POINTERUPDATE` is a mouse's right button going down (once
+/// per press: holding it sends no more). A right press while the left button is held comes as
+/// an update, so it's caught too, for the app to ignore mid-stroke.
+pub fn right_button_down(wparam: WPARAM) -> bool {
+    let id = (wparam.0 & 0xFFFF) as u32;
+    // SAFETY: each call fills a value we own.
+    unsafe {
+        let mut t = POINTER_INPUT_TYPE::default();
+        let mut info = POINTER_INFO::default();
+        GetPointerType(id, &mut t).is_ok()
+            && GetPointerInfo(id, &mut info).is_ok()
+            && is_right_press(kind_of(t), info.ButtonChangeType)
+    }
+}
+
+/// A right press is the mouse's alone. A pen's barrel button is its second button too, but it's
+/// held while drawing and pressed by grip, so it never counts; nor does touch, whose
+/// press-and-hold Windows would turn into a right-click.
+fn is_right_press(kind: PointerKind, change: POINTER_BUTTON_CHANGE_TYPE) -> bool {
+    kind == PointerKind::Mouse && change == POINTER_CHANGE_SECONDBUTTON_DOWN
+}
+
 /// A sample packed into a message's `wparam` and `lparam`, for the overlay's test message: how
 /// checks draw through the same path as `WM_POINTER*` without global input (Windows has no way
 /// to make a real pointer sample but injecting input system-wide).
@@ -182,6 +204,33 @@ pub fn unpack(wp: usize, lp: isize, time_100ns: i64) -> Sample {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::UI::Input::Pointer::{
+        POINTER_CHANGE_FIRSTBUTTON_DOWN, POINTER_CHANGE_NONE, POINTER_CHANGE_SECONDBUTTON_UP,
+    };
+
+    #[test]
+    fn only_the_mouses_right_button_going_down_is_a_right_press() {
+        assert!(is_right_press(
+            PointerKind::Mouse,
+            POINTER_CHANGE_SECONDBUTTON_DOWN
+        ));
+        for change in [
+            POINTER_CHANGE_NONE,
+            POINTER_CHANGE_FIRSTBUTTON_DOWN,
+            POINTER_CHANGE_SECONDBUTTON_UP,
+        ] {
+            assert!(!is_right_press(PointerKind::Mouse, change), "{change:?}");
+        }
+        // A pen's barrel button and a finger's press-and-hold.
+        assert!(!is_right_press(
+            PointerKind::Pen,
+            POINTER_CHANGE_SECONDBUTTON_DOWN
+        ));
+        assert!(!is_right_press(
+            PointerKind::Touch,
+            POINTER_CHANGE_SECONDBUTTON_DOWN
+        ));
+    }
 
     #[test]
     fn a_packed_sample_comes_back_the_same() {

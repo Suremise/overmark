@@ -100,6 +100,9 @@ blocks.
 
 - **Ctrl+Z** undoes, and **Ctrl+Y** (or **Ctrl+Shift+Z**) redoes, at least 100 steps back. Every
   stroke, shape, text, stamp, blur and erase is a step.
+- **A right-click on the drawing** undoes too, one step a click, as Ctrl+Z does. It's the mouse's
+  right button only (not a pen's button or touch), and does nothing while you're drawing. Turn it
+  off in Settings (Drawing) if you'd rather it didn't.
 - **Delete** clears the drawing on every monitor, as one step: **Ctrl+Z** brings it all back.
 - Undo and redo work across monitors: Ctrl+Z undoes your last change, wherever it was.
 
@@ -233,9 +236,9 @@ apply even while the layer is open.
   and **Print Screen**. See [Hotkeys and Print Screen](#hotkeys-and-print-screen).
 - **Drawing:** the tool the layer starts with; the **palette** (click a colour to change it) and
   the colour it starts with; each tool's **starting width**; the **dim** (0 turns it off);
-  **disappearing ink** and its delay; the **laser's trail**; the whiteboard's and blackboard's
-  **colours**; and the **guides**: their spacing, whether screen shares see them, and whether saves
-  include them.
+  **disappearing ink** and its delay; the **laser's trail**; whether a **right-click undoes**; the
+  whiteboard's and blackboard's **colours**; and the **guides**: their spacing, whether screen
+  shares see them, and whether saves include them.
 - **Capture:** where captures go and how they're named and saved: see [Capturing](#capturing).
 - **About and advanced:** the version and licence, the author and the link to Overmark's
   repository; whether this copy is portable or installed and
@@ -363,6 +366,7 @@ press the keys.
 | **W**, **Shift+W** | The next or previous backdrop: Live, Frozen, whiteboard, blackboard |
 | **G**, **Shift+G** | The next or previous guides: none, grid, dots, ruled lines |
 | **Ctrl+Z** | Undo |
+| Right-click (the mouse) | Undo, unless turned off in Settings |
 | **Ctrl+Y**, **Ctrl+Shift+Z** | Redo |
 | **Delete** | Clear (Ctrl+Z brings it back) |
 | **Ctrl+S** | Save the monitor the pointer is on |

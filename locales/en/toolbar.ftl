@@ -67,6 +67,8 @@ toolbar-unfreeze-tooltip = Let the screen move again ({ $key })
 toolbar-freeze-boards-tooltip = Freezing is for the live screen: choose Live, or press { $key } to freeze it
 toolbar-undo = Undo
 toolbar-undo-tooltip = Undo ({ $key })
+# With Settings' "Right-click undoes" on. $key: the undo key.
+toolbar-undo-right-click-tooltip = Undo ({ $key }, or right-click the drawing)
 toolbar-redo = Redo
 toolbar-redo-tooltip = Redo ({ $key })
 toolbar-clear = Clear

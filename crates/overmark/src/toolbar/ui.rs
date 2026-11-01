@@ -35,6 +35,8 @@ pub struct State {
     pub collapsed: bool,
     /// Settings' disappearing ink, which the toolbar turns on and off.
     pub disappearing_ink: bool,
+    /// Settings' "Right-click undoes": the undo button's tooltip says so.
+    pub right_click_undoes: bool,
 }
 
 /// What a control asks for.
@@ -449,7 +451,11 @@ fn expanded(ui: &mut Ui, state: &State, actions: &mut Vec<Action>) {
             ui,
             glyph(Glyph::Undo),
             &tr("toolbar-undo"),
-            &tr!("toolbar-undo-tooltip", key = ctrl("Z")),
+            &if state.right_click_undoes {
+                tr!("toolbar-undo-right-click-tooltip", key = ctrl("Z"))
+            } else {
+                tr!("toolbar-undo-tooltip", key = ctrl("Z"))
+            },
         )
         .clicked()
         {
@@ -1108,6 +1114,7 @@ mod tests {
             can_redo: false,
             collapsed: false,
             disappearing_ink: false,
+            right_click_undoes: true,
         }
     }
 
@@ -1902,6 +1909,14 @@ mod tests {
             "Ctrl+Shift+Alt+S"
         );
         assert!(tr!("toolbar-undo-tooltip", key = keys(&["key-ctrl"], "Z")).contains("Ctrl+Z"));
+        let right = tr!(
+            "toolbar-undo-right-click-tooltip",
+            key = keys(&["key-ctrl"], "Z")
+        );
+        assert!(
+            right.contains("Ctrl+Z") && right.contains("right-click"),
+            "{right}"
+        );
         for key in [
             "toolbar-backdrop",
             "toolbar-backdrop-tooltip",

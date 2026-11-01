@@ -530,6 +530,7 @@ mod tests {
             can_redo: false,
             collapsed: false,
             disappearing_ink: false,
+            right_click_undoes: true,
         };
         let (w, h) = (1040, 360);
         for group in [
@@ -600,6 +601,7 @@ mod tests {
             can_redo: false,
             collapsed: false,
             disappearing_ink: false,
+            right_click_undoes: true,
         };
         let (w, h) = (1040, 360);
         let takes = |solid: &[Rect], x: usize, y: usize| {
@@ -747,6 +749,7 @@ mod tests {
             can_redo: false,
             collapsed: false,
             disappearing_ink: false,
+            right_click_undoes: true,
         };
         let (w, h) = (1040, 360);
         // An area measures itself in its first frame and shows from the next ones.

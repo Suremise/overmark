@@ -28,6 +28,7 @@ fn changed() -> Settings {
     s.drawing.disappearing_ink = true;
     s.drawing.disappearing_ink_seconds = 1.5;
     s.drawing.laser_trail_ms = 0;
+    s.drawing.right_click_undoes = false;
     s.capture.save_folder = r"D:\Shots\It's mine".into();
     s.capture.file_name_pattern = "shot {{{year}}} \"q\"".into();
     s.capture.after_capture = AfterCapture::Copy;
@@ -62,6 +63,7 @@ fn the_defaults() {
     assert_eq!(s.drawing.palette.len(), PALETTE_SIZE);
     assert!((0.3..=0.4).contains(&s.drawing.dim));
     assert!(!s.drawing.disappearing_ink);
+    assert!(s.drawing.right_click_undoes);
     // Copy and save, decided.
     assert_eq!(s.capture.after_capture, AfterCapture::CopyAndSave);
     assert!(s.capture.after_capture.copies() && s.capture.after_capture.saves());

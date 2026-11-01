@@ -767,6 +767,12 @@ platform-free and tested), and the drawing while the layer is open (`overmark::i
   (`PEN_FLAG_ERASER` or `INVERTED`); a mouse draws with its left button only, its speed setting
   the width (core); touch draws as a mouse. Samples carry the hardware's time (the performance
   counter, as `clock`), or the time read when a device gives none.
+- **Right-click undoes** (a Drawing setting, on by default): `win32::pointer::right_button_down`
+  reads the message's button change, and only a mouse's right button going down counts, never a
+  pen's barrel button (held while drawing) or touch (whose press-and-hold Windows turns into a
+  right-click). The layer handles every pointer message, so Windows makes no mouse messages or
+  context menu from them. The ink ignores it while anything touches, so a right-click
+  mid-stroke neither undoes nor cuts the stroke, and the app ignores it while a region is chosen.
 - **A contact** (touching down until it lifts) draws on the monitor where it started, whichever
   layer its later samples come to. **The pen's eraser end** erases (whole items) for that
   contact, and the tool comes back after it. **The laser** follows the pointer touching or not,

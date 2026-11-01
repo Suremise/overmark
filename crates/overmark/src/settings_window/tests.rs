@@ -273,6 +273,8 @@ fn drawing_changes_are_saved() {
         .set_value_accesskit(48.0);
     h.get_by_label(&tr("settings-guides-on-shares")).click();
     h.run();
+    h.get_by_label(&tr("settings-right-click-undoes")).click();
+    h.run();
     choose(
         &mut h,
         &tr("settings-default-colour"),
@@ -284,6 +286,7 @@ fn drawing_changes_are_saved() {
     assert!(d.disappearing_ink);
     assert_eq!(d.disappearing_ink_seconds, 5.0);
     assert_eq!(d.laser_trail_ms, 2000);
+    assert!(!d.right_click_undoes, "on by default, turned off");
     assert_eq!(d.widths.pen, 12.0);
     let w = d.widths;
     assert_eq!(

@@ -145,6 +145,10 @@ pub enum OverlayEvent {
         sample: crate::win32::pointer::Sample,
         shift: bool,
     },
+    /// The mouse's right button went down over monitor `screen`'s layer (never a pen's barrel
+    /// button or touch), after that message's samples. It comes mid-stroke too, when the left
+    /// button is held: the app decides.
+    RightClick { screen: usize },
     /// The wheel turned (`delta` in 120ths of a notch) over monitor `screen`'s layer.
     Wheel { screen: usize, delta: i32 },
     /// A capture's key, or its [`WM_OVERMARK_COMMAND`].
@@ -405,6 +409,9 @@ pub const WM_OVERMARK_POINTER: u32 = windows::Win32::UI::WindowsAndMessaging::WM
 /// Posted to an ink layer: a key, `wparam` its virtual-key code, `lparam` bit 0 Ctrl, 1 Shift,
 /// 2 Alt, 3 released. (A posted `WM_KEYDOWN` can't say which modifiers are down.)
 pub const WM_OVERMARK_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x42;
+/// Posted to an ink layer: the mouse's right button went down, as [`OverlayEvent::RightClick`]
+/// (no parameters). Windows can't make a real one without global input.
+pub const WM_OVERMARK_RIGHT_CLICK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x43;
 
 fn phase_bits(p: Phase) -> usize {
     match p {
@@ -484,6 +491,7 @@ fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler
             };
             let (_, shift, _) = window::modifiers();
             let samples = pointer::samples(wp);
+            let right = phase != Phase::Up && pointer::right_button_down(wp);
             let n = samples.len();
             let mut e = events.borrow_mut();
             for (k, sample) in samples.into_iter().enumerate() {
@@ -496,6 +504,16 @@ fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler
                     shift,
                 });
             }
+            if right {
+                e.push(OverlayEvent::RightClick { screen });
+            }
+            // Handled, so Windows makes no mouse messages from it (and no context menu).
+            Some(LRESULT(0))
+        }
+        WM_OVERMARK_RIGHT_CLICK => {
+            events
+                .borrow_mut()
+                .push(OverlayEvent::RightClick { screen });
             Some(LRESULT(0))
         }
         WM_POINTERLEAVE => {
@@ -1660,6 +1678,22 @@ impl Selection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The test message is a right-click on its screen's layer; a pointer message Windows
+    /// knows nothing of (a pointer id that isn't live) is nothing at all.
+    #[test]
+    fn a_right_click_comes_from_its_layer() {
+        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::WM_POINTERDOWN;
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let handler = ink_handler(events.clone(), 2);
+        let none = HWND::default();
+        assert!(handler(none, WM_OVERMARK_RIGHT_CLICK, WPARAM(0), LPARAM(0)).is_some());
+        assert_eq!(*events.borrow(), [OverlayEvent::RightClick { screen: 2 }]);
+        events.borrow_mut().clear();
+        handler(none, WM_POINTERDOWN, WPARAM(0xBEEF), LPARAM(0));
+        assert!(events.borrow().is_empty(), "{:?}", events.borrow());
+    }
 
     fn decode(units: &[u16]) -> String {
         let mut high = None;

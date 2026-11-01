@@ -436,6 +436,7 @@ impl App {
             can_redo,
             collapsed: self.toolbar_collapsed,
             disappearing_ink: self.settings.drawing.disappearing_ink,
+            right_click_undoes: self.settings.drawing.right_click_undoes,
         }
     }
 
@@ -627,6 +628,13 @@ impl App {
                     self.raise_toolbar();
                 }
             }
+            // A right-click on another monitor's layer while a region is chosen keeps that as it
+            // was: it does nothing (Esc cancels).
+            OverlayEvent::RightClick { .. }
+                if self
+                    .overlay
+                    .as_ref()
+                    .is_some_and(Overlay::is_choosing_region) => {}
             e => {
                 let outcome = self.ink.handle(e, &self.settings.drawing);
                 self.outcome(outcome);
