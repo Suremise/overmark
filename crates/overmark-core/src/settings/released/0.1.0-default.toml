@@ -1,0 +1,107 @@
+# Overmark settings. Every key is optional: a missing key takes the default given
+# in its comment. Overmark rewrites this file when you change a setting in its
+# Settings window, so comments you add here are not kept.
+
+[general]
+# Start Overmark when you log on to Windows (default false).
+start_with_windows = false
+# What left-clicking the tray icon does: "live" (draw; the default), "frozen" (draw on a
+# frozen screen) or "settings" (open Settings).
+tray_click = "live"
+# The hotkey that opens the drawing layer, Live (default "Win+Shift+D"). Keys are joined with
+# "+": Ctrl, Alt, Shift and Win, then one key. "" turns it off.
+hotkey_draw = "Win+Shift+D"
+# The hotkey that opens the layer on a frozen screen (default "Win+Shift+F"). "" turns it off.
+hotkey_draw_frozen = "Win+Shift+F"
+# What Print Screen does: "off" (Windows keeps it; the default), "live" or "frozen". Windows 11
+# sends Print Screen to the Snipping Tool unless you turn that off in its Settings.
+print_screen = "off"
+
+[drawing]
+# The tool picked when the layer opens (default "pen"): "pen", "highlighter", "arrow",
+# "rectangle", "ellipse", "line", "text", "stamp", "blur", "eraser" or "laser".
+default_tool = "pen"
+# The colours keys 1 to 9 pick, as "#RRGGBB" (or "#RRGGBBAA"): red, amber, yellow, green, blue,
+# purple, black, white, then one of your own. Nine colours; change any of them.
+palette = ["#E53935", "#FF8F00", "#FDD835", "#43A047", "#1E88E5", "#8E24AA", "#212121", "#FFFFFF", "#00ACC1"]
+# Which palette colour the layer opens with, 0 (the first) to 8 (default 0).
+default_colour = 0
+# How dark the screen is veiled while the layer is open, 0 (off) to 0.8 (default 0.35).
+dim = 0.35
+# Make strokes fade a few seconds after you draw them, for calls (default false).
+disappearing_ink = false
+# How many seconds a stroke stays before it fades, 0.5 to 60 (default 3).
+disappearing_ink_seconds = 3.0
+# How long the laser pointer's trail lasts, in milliseconds, 0 to 5000 (default 500).
+laser_trail_ms = 500
+
+# Each tool's starting width in pixels at 100% scale, 1 to 200. For text it's the font size,
+# for stamps their size, for blur the size of its blocks.
+[drawing.widths]
+# Pen (default 4.0).
+pen = 4.0
+# Highlighter (default 20.0).
+highlighter = 20.0
+# Arrow (default 4.0).
+arrow = 4.0
+# Rectangle (default 4.0).
+rectangle = 4.0
+# Ellipse (default 4.0).
+ellipse = 4.0
+# Line (default 4.0).
+line = 4.0
+# Text: the font size (default 24.0).
+text = 24.0
+# Numbered stamps: their size (default 28.0).
+stamp = 28.0
+# Blur: the size of its blocks (default 12.0).
+blur = 12.0
+
+[capture]
+# Where captures are saved. {pictures} is your Pictures folder (default '{pictures}\Overmark').
+save_folder = '{pictures}\Overmark'
+# The file name, without its extension. Codes in braces are replaced by the capture's time:
+# {year} {yy} {month} {day} {hour} {minute} {second} {millisecond}. The default gives
+# "2026-10-21 09.42.17". A name that's taken gets " (2)" and so on.
+file_name_pattern = "{year}-{month}-{day} {hour}.{minute}.{second}"
+# What a capture does: "copy-and-save" (the default), "copy" (to the clipboard only) or "save".
+after_capture = "copy-and-save"
+# The saved file's format: "png" (the default) or "jpg".
+format = "png"
+# JPG quality, 1 to 100 (default 90).
+jpg_quality = 90
+# Include your drawing in captures; a separate key saves without it (default true).
+include_drawing = true
+# Show a small notice after each capture saying where it went (default true).
+toast = true
+
+[advanced]
+# Look for a newer version on GitHub. Overmark only reads the latest release and never
+# downloads or installs anything by itself (default false: no network at all).
+check_for_updates = false
+
+# What's under the ink: W cycles Live, Frozen, the whiteboard and the blackboard.
+[backdrops]
+# The whiteboard's colour, as "#RRGGBB" (default "#FFFFFF").
+whiteboard_colour = "#FFFFFF"
+# The blackboard's colour (default "#262A2E", a dark grey).
+blackboard_colour = "#262A2E"
+# A hotkey that opens the layer on the whiteboard, as general's hotkeys are written
+# (default "": none). Live and Frozen use hotkey_draw and hotkey_draw_frozen.
+hotkey_whiteboard = ""
+# A hotkey that opens the layer on the blackboard (default "": none).
+hotkey_blackboard = ""
+
+# Guides over the backdrop: G cycles off, a grid, dots and ruled lines.
+[guides]
+# The distance between grid lines, dots or ruled lines, in pixels at 100% scale, 8 to 400
+# (default 32).
+spacing = 32
+# Show the guides to people watching a screen share (default true).
+show_on_shares = true
+# Include the guides in saves and copies (default true).
+include_in_saves = true
+
+# Where you left the toolbar on each monitor, in pixels from the monitor's top-left
+# corner. Overmark keeps these up to date.
+[toolbar.positions]

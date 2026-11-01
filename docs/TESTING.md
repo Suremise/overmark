@@ -73,6 +73,24 @@ $env:UPDATE_GOLDEN=1; cargo test -p overmark-core --test golden; Remove-Item Env
 **Rendering speed:** `cargo bench -p overmark-core --bench redraw` times a long stroke on a 4K
 layer (docs/ARCHITECTURE.md, Drawing and rendering).
 
+## Settings from every release
+
+Upgrading never loses a setting. `crates/overmark-core/src/settings/released/` holds each
+release's `settings.toml` as that release wrote it: `<version>-default.toml` (its defaults) and
+`<version>-changed.toml` (every setting away from its default). A test loads each with today's
+code and checks there are no warnings and every value the file set is kept; keys added since
+take their defaults. Another checks each changed file, and the tests' `changed()` that writes
+the next one, sets every key away from its default: **a new setting goes in `changed()`** with
+a value of its own. **Each release adds its own pair** while it's being readied, written by
+that release's code, then lists them in the test's `RELEASED`:
+
+```powershell
+$env:UPDATE_RELEASED='<version>'; cargo test -p overmark-core released; Remove-Item Env:UPDATE_RELEASED
+```
+
+The files are never changed afterwards: a failure means a release's file no longer loads as it
+did, so fix the loading (an alias for a renamed key, say), not the file.
+
 ## A flaky test
 
 Fix it at its cause: a test that waits for what it expects, or a race in the product. **The proof

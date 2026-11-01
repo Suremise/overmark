@@ -23,7 +23,15 @@ fn changed() -> Settings {
         a: 128,
     };
     s.drawing.default_colour = 4;
+    s.drawing.widths.pen = 6.5;
+    s.drawing.widths.highlighter = 30.0;
+    s.drawing.widths.arrow = 5.5;
+    s.drawing.widths.rectangle = 3.0;
+    s.drawing.widths.ellipse = 2.5;
+    s.drawing.widths.line = 7.0;
     s.drawing.widths.text = 31.5;
+    s.drawing.widths.stamp = 40.0;
+    s.drawing.widths.blur = 16.0;
     s.drawing.dim = 0.0;
     s.drawing.disappearing_ink = true;
     s.drawing.disappearing_ink_seconds = 1.5;
@@ -468,4 +476,95 @@ fn a_width_steps_a_tenth_at_a_time_inside_its_range() {
     assert_eq!(Widths::stepped(hi, 1.0), hi);
     assert_eq!(Widths::stepped(lo, -1.0), lo);
     assert_eq!(Widths::stepped(5000.0, 0.0), hi);
+}
+
+/// Each release's settings files, as that release wrote them: its defaults, and one with every
+/// setting changed ([`changed`]). Upgrading never loses a setting, so each loads with no warnings
+/// and keeps every value it set. Each release adds its own pair here (docs/TESTING.md):
+/// `UPDATE_RELEASED=<version> cargo test -p overmark-core released` writes them from the code as
+/// it is, then add their two lines below.
+const RELEASED: &[(&str, &str)] = &[
+    ("0.1.0-default", include_str!("released/0.1.0-default.toml")),
+    ("0.1.0-changed", include_str!("released/0.1.0-changed.toml")),
+];
+
+/// Every key `old` sets is in `new` with the same value. (`new` is the file as this version
+/// saves it, so a float reads as it's written: 0.35, not the f32's 0.3499999940395355.)
+fn assert_keeps(path: &str, old: &toml::Table, new: &toml::Table, file: &str) {
+    for (key, value) in old {
+        let at = format!("{path}{key}");
+        match (value, new.get(key)) {
+            (toml::Value::Table(o), Some(toml::Value::Table(n))) => {
+                assert_keeps(&format!("{at}."), o, n, file);
+            }
+            (o, n) => assert_eq!(Some(o), n, "{file}: {at}"),
+        }
+    }
+}
+
+/// The keys that are the same in `a` and `b`, by dotted path.
+fn same_keys(path: &str, a: &toml::Table, b: &toml::Table) -> Vec<String> {
+    let mut same = Vec::new();
+    for (key, value) in a {
+        let at = format!("{path}{key}");
+        match (value, b.get(key)) {
+            (toml::Value::Table(x), Some(toml::Value::Table(y))) => {
+                same.extend(same_keys(&format!("{at}."), x, y));
+            }
+            (x, y) if Some(x) == y => same.push(at),
+            _ => {}
+        }
+    }
+    same
+}
+
+/// Each release's changed file sets every key away from its default, so a value lost on
+/// loading shows; and so does today's [`changed`], which writes the next release's.
+#[test]
+fn each_changed_file_changes_every_setting() {
+    let mut pairs: Vec<(String, toml::Table, toml::Table)> = RELEASED
+        .chunks(2)
+        .map(|pair| {
+            let [(name, default), (_, changed)] = pair else {
+                panic!("RELEASED lists each release's default file, then its changed one")
+            };
+            (
+                name.to_string(),
+                default.parse().unwrap(),
+                changed.parse().unwrap(),
+            )
+        })
+        .collect();
+    pairs.push((
+        "today's".into(),
+        Settings::default().to_documented_toml().parse().unwrap(),
+        changed().to_documented_toml().parse().unwrap(),
+    ));
+    for (name, default, changed) in pairs {
+        let same = same_keys("", &default, &changed);
+        assert!(same.is_empty(), "{name}: the changed file keeps {same:?}");
+    }
+}
+
+#[test]
+fn every_released_versions_settings_load_and_keep_their_values() {
+    if let Some(version) = std::env::var_os("UPDATE_RELEASED") {
+        let version = version.to_string_lossy();
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/settings/released");
+        for (kind, settings) in [("default", Settings::default()), ("changed", changed())] {
+            let path = folder.join(format!("{version}-{kind}.toml"));
+            fs::write(&path, settings.to_documented_toml()).unwrap();
+        }
+    }
+    for (name, text) in RELEASED {
+        let loaded = parse(text);
+        assert!(loaded.warnings.is_empty(), "{name}: {:?}", loaded.warnings);
+        let old: toml::Table = text.parse().unwrap();
+        let new: toml::Table = loaded.settings.to_documented_toml().parse().unwrap();
+        assert_keeps("", &old, &new, name);
+    }
+    // 0.1.0 had no right-click undo: either file takes its default.
+    for (name, text) in &RELEASED[..2] {
+        assert!(parse(text).settings.drawing.right_click_undoes, "{name}");
+    }
 }

@@ -25,7 +25,8 @@ yet, so Windows SmartScreen warns about both (see the checklist).
      release's notes are that section, so write it for the people downloading Overmark, and
      say that it isn't signed yet and how to check the download.
 2. **Set the version** in `Cargo.toml` (`[workspace.package] version`), and run `cargo check` so
-   `Cargo.lock` follows. Regenerate the notices again (they name the version).
+   `Cargo.lock` follows. Regenerate the notices again (they name the version). Add the
+   release's settings files to the tests (docs/TESTING.md, Settings from every release).
 3. **Build locally and check** (optional, but it's what the workflow does):
    `pwsh scripts/package.ps1` writes `target\dist\`. It checks, and fails on, each of: the
    notices up to date; the exe's imports (no C runtime DLL); the exe's own icon (resource 1)
