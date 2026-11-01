@@ -525,3 +525,85 @@ fn a_change_on_disk_replaces_a_draft_pattern() {
         Some("FROM DISK {day}")
     );
 }
+
+/// The box beside the slider named `setting`, to type its value in.
+fn value_box(h: &Harness<'_, SettingsApp>, setting: &str) -> eframe::egui::Rect {
+    h.get_by_label(&tr!("settings-value-box", setting = tr(setting)))
+        .rect()
+}
+
+/// A card's value boxes are one width, whatever values they show, so its sliders line up; and
+/// no box changes width as its number grows.
+#[test]
+fn a_cards_value_boxes_are_one_width_whatever_their_values() {
+    let s = Setup::new();
+    let mut h = s.window(Page::Drawing);
+    let widths = [
+        "settings-width-pen",
+        "settings-width-highlighter",
+        "settings-width-shapes",
+        "settings-width-text",
+        "settings-width-stamp",
+        "settings-width-blur",
+    ];
+    let drawing = [
+        "settings-dim",
+        "settings-disappearing-ink-delay",
+        "settings-laser-trail",
+    ];
+    let measure = |h: &Harness<'_, SettingsApp>, group: &[&str]| -> Vec<(f32, f32, f32)> {
+        group
+            .iter()
+            .map(|s| {
+                let b = value_box(h, s);
+                let slider = h.get_by_label(&tr(s)).rect();
+                (b.width(), b.left(), slider.left())
+            })
+            .collect()
+    };
+    let first = [measure(&h, &widths), measure(&h, &drawing)];
+    for group in &first {
+        let (w, x, slider) = group[0];
+        assert!(w >= 40.0, "{group:?}");
+        for &(w2, x2, slider2) in group {
+            assert_eq!((w2, x2, slider2), (w, x, slider), "{group:?}");
+        }
+    }
+    // One digit, three, and the widest texts each card shows.
+    h.get_by_label(&tr("settings-width-pen"))
+        .set_value_accesskit(1.0);
+    h.get_by_label(&tr("settings-width-highlighter"))
+        .set_value_accesskit(200.0);
+    h.get_by_label(&tr("settings-dim")).set_value_accesskit(0.0);
+    h.get_by_label(&tr("settings-laser-trail"))
+        .set_value_accesskit(5000.0);
+    h.run();
+    let d = s.saved().drawing;
+    assert_eq!((d.widths.pen, d.widths.highlighter), (1.0, 200.0));
+    assert_eq!((d.dim, d.laser_trail_ms), (0.0, 5000));
+    assert_eq!([measure(&h, &widths), measure(&h, &drawing)], first);
+}
+
+/// Typing in a value box keeps its width (the text scrolls inside it), reads a number with its
+/// unit or without, and keeps what's typed in the slider's range.
+#[test]
+fn typing_in_a_value_box_keeps_its_width_and_the_range() {
+    use eframe::egui::Key;
+    let s = Setup::new();
+    let mut h = s.window(Page::Drawing);
+    let label = tr!("settings-value-box", setting = tr("settings-width-pen"));
+    let before = value_box(&h, "settings-width-pen");
+    for (typed, kept) in [("12 px", 12.0), ("123456789", 200.0), ("7", 7.0)] {
+        h.get_by_label(&label).focus();
+        h.run();
+        h.get_by_label(&label).type_text(typed);
+        h.run();
+        let editing = value_box(&h, "settings-width-pen");
+        assert_eq!(editing.width(), before.width(), "typing {typed}");
+        assert_eq!(editing.left(), before.left(), "typing {typed}");
+        h.key_press(Key::Enter);
+        h.run();
+        assert_eq!(s.saved().drawing.widths.pen, kept, "typed {typed}");
+        assert_eq!(value_box(&h, "settings-width-pen"), before);
+    }
+}

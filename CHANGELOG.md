@@ -25,6 +25,8 @@ settings.
 
 - The tray icon's tooltip stays after drawing: it went once the icon first changed (opening
   the layer, a balloon, a theme or DPI change) and didn't come back.
+- Settings' number boxes beside the sliders are one width in each group, so the sliders line
+  up, and they no longer grow as you type. A number typed with its unit ("12 px") now counts.
 
 ## [0.1.0] - 2026-11-01
 

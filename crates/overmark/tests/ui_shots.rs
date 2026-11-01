@@ -206,6 +206,11 @@ impl Host for Still {
 
 /// Settings on `page`, over default settings in a temp folder of its own (installed).
 fn settings_screen(v: Variant, path: &Path, page: Page) {
+    settings_screen_sized(v, path, page, 640.0);
+}
+
+/// [`settings_screen`], `height` points tall: a whole page, to see its rows line up.
+fn settings_screen_sized(v: Variant, path: &Path, page: Page, height: f32) {
     let temp = tempfile::tempdir().unwrap();
     let (exe, appdata) = (temp.path().join("app"), temp.path().join("appdata"));
     std::fs::create_dir_all(&exe).unwrap();
@@ -214,7 +219,7 @@ fn settings_screen(v: Variant, path: &Path, page: Page) {
     let pictures = PathBuf::from(r"C:\Users\Someone\Pictures");
     let app = SettingsApp::new(&startup, Box::new(Still(pictures)), page);
     let mut harness = v
-        .sized(780.0, 640.0)
+        .sized(780.0, height)
         .build_ui_state(|ui, app: &mut SettingsApp| app.show(ui), app);
     save(&mut harness, v.scale, path);
 }
@@ -244,6 +249,11 @@ fn screens() -> Vec<(&'static str, Shoot)> {
             Box::new(move |v: Variant, path: &Path| settings_screen(v, path, page)),
         ));
     }
+    // The whole Drawing page, its value boxes and sliders lined up.
+    screens.push((
+        "settings-drawing-whole",
+        Box::new(|v: Variant, path: &Path| settings_screen_sized(v, path, Page::Drawing, 1500.0)),
+    ));
     // The toolbar, expanded and Frozen (its backdrop's button; Unfreeze), and
     // collapsed.
     screens.push((

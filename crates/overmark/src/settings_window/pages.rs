@@ -538,26 +538,135 @@ fn colour_button(ui: &mut Ui, value: &mut Colour, name: &str, alpha: Alpha) -> e
     r
 }
 
-/// A slider row: `value` within `range`, shown by `format`.
+/// How a slider row's number is written ("4 px", "35%") and read back from what's typed in its
+/// box.
+#[derive(Clone, Copy)]
+struct Numbers {
+    format: fn(f64) -> String,
+    parse: fn(&str) -> Option<f64>,
+}
+
+/// Pixels: "4 px".
+const PX: Numbers = Numbers {
+    format: |v| tr!("toolbar-width-value", width = format!("{v:.0}")),
+    parse: leading_number,
+};
+/// The dim: "Off", or a percentage of the 0 to 1 it's kept as.
+const DIM: Numbers = Numbers {
+    format: |v| {
+        if v <= 0.0 {
+            tr("settings-dim-off")
+        } else {
+            tr!("settings-percent", percent = (v * 100.0).round() as i64)
+        }
+    },
+    parse: |s| match leading_number(s) {
+        Some(percent) => Some(percent / 100.0),
+        None => s
+            .trim()
+            .eq_ignore_ascii_case(&tr("settings-dim-off"))
+            .then_some(0.0),
+    },
+};
+/// Seconds, to a tenth: "3 seconds".
+const SECONDS: Numbers = Numbers {
+    format: |v| tr!("settings-seconds", seconds = (v * 10.0).round() / 10.0),
+    parse: leading_number,
+};
+/// Milliseconds: "500 ms".
+const MS: Numbers = Numbers {
+    format: |v| tr!("settings-ms", ms = v.round() as u64),
+    parse: leading_number,
+};
+/// A plain number: JPG's quality.
+const PLAIN: Numbers = Numbers {
+    format: |v| format!("{v:.0}"),
+    parse: leading_number,
+};
+
+/// The first number in `text` ("12 px" is 12, "0.5 seconds" 0.5), with its unit or without.
+fn leading_number(text: &str) -> Option<f64> {
+    let start = text.find(|c: char| c.is_ascii_digit() || c == '.' || c == '-')?;
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// What each value of `range`, in steps of `step`, looks like written by `numbers`.
+fn every_value(range: std::ops::RangeInclusive<f64>, step: f64, numbers: Numbers) -> Vec<String> {
+    let (lo, hi) = (*range.start(), *range.end());
+    let steps = ((hi - lo) / step).round() as u64;
+    (0..=steps)
+        .map(|i| (numbers.format)((lo + i as f64 * step).min(hi)))
+        .collect()
+}
+
+/// The value boxes of a card's sliders, all one width: the widest text any of them can show
+/// (`texts`, every value each can take), in the current font and scale, so the sliders beside
+/// them line up and no box grows as its number does. Measured once for a scale and kept,
+/// under `key`.
+fn value_box_width(ui: &Ui, key: &str, texts: impl FnOnce() -> Vec<String>) -> f32 {
+    let id = egui::Id::unique(("value-box-width", key));
+    let scale = ui.ctx().pixels_per_point();
+    if let Some((at, width)) = ui.data(|d| d.get_temp::<(f32, f32)>(id))
+        && at == scale
+    {
+        return width;
+    }
+    let font = ui.style().drag_value_text_style.resolve(ui.style());
+    let painter = ui.painter();
+    let text = texts()
+        .into_iter()
+        .map(|t| {
+            painter
+                .layout_no_wrap(t, font.clone(), Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    let width = (text + 2.0 * ui.spacing().button_padding.x).ceil();
+    ui.data_mut(|d| d.insert_temp(id, (scale, width)));
+    width
+}
+
+/// A slider row: `value` within `range` on a slider, and in a box of `width` beside it (its
+/// card's [`value_box_width`]) to type into. The box keeps its width as you type, the text
+/// scrolling inside it, and what's typed is kept in `range`.
 fn slider_row<N: egui::emath::Numeric>(
     ui: &mut Ui,
     label: &str,
     help: Option<&str>,
     value: &mut N,
     range: std::ops::RangeInclusive<N>,
-    format: impl Fn(f64) -> String + 'static,
+    numbers: Numbers,
+    width: f32,
 ) {
+    let span = range.end().to_f64() - range.start().to_f64();
     setting_row(ui, label, help, |ui| {
-        ui.add(
-            egui::Slider::new(value, range)
-                .custom_formatter(move |v, _| format(v))
+        // Right to left: the slider at the row's end, its box before it.
+        let slider = ui.add(
+            egui::Slider::new(value, range.clone())
+                .custom_formatter(move |v, _| (numbers.format)(v))
+                .show_value(false)
                 .text(""),
+        );
+        let size = egui::vec2(width, ui.spacing().interact_size.y);
+        let speed = span / f64::from(ui.spacing().slider_width.max(1.0));
+        ui.add_sized(
+            size,
+            egui::DragValue::new(value)
+                .range(range)
+                .speed(speed)
+                .custom_formatter(move |v, _| (numbers.format)(v))
+                .custom_parser(numbers.parse)
+                .clip_text(true)
+                .min_size(size),
         )
+        .accessible_name(tr!("settings-value-box", setting = label));
+        slider
     });
-}
-
-fn px(v: f64) -> String {
-    tr!("toolbar-width-value", width = format!("{v:.0}"))
 }
 
 fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
@@ -610,15 +719,25 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
     ui.add_space(space::M);
     section_card(ui, &tr("settings-default-widths"), None, |ui| {
         let (lo, hi) = Widths::RANGE;
+        let boxes = value_box_width(ui, "widths", || every_value(lo as f64..=hi as f64, 1.0, PX));
         let w = &mut d.widths;
-        slider_row(ui, &tr("settings-width-pen"), None, &mut w.pen, lo..=hi, px);
+        slider_row(
+            ui,
+            &tr("settings-width-pen"),
+            None,
+            &mut w.pen,
+            lo..=hi,
+            PX,
+            boxes,
+        );
         slider_row(
             ui,
             &tr("settings-width-highlighter"),
             None,
             &mut w.highlighter,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
         // One width for every shape and arrow.
         let mut shapes = w.arrow;
@@ -628,7 +747,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut shapes,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
         if shapes != w.arrow {
             (w.arrow, w.rectangle, w.ellipse, w.line) = (shapes, shapes, shapes, shapes);
@@ -639,7 +759,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut w.text,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
         slider_row(
             ui,
@@ -647,7 +768,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut w.stamp,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
         slider_row(
             ui,
@@ -655,24 +777,34 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut w.blur,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
     });
     ui.add_space(space::M);
     plain_card(ui, None, |ui| {
+        let boxes = value_box_width(ui, "drawing", || {
+            let mut all = every_value(f64::from(DIM_RANGE.0)..=f64::from(DIM_RANGE.1), 0.01, DIM);
+            all.extend(every_value(
+                f64::from(INK_SECONDS_RANGE.0)..=f64::from(INK_SECONDS_RANGE.1),
+                0.1,
+                SECONDS,
+            ));
+            all.extend(every_value(
+                LASER_TRAIL_RANGE.0 as f64..=LASER_TRAIL_RANGE.1 as f64,
+                1.0,
+                MS,
+            ));
+            all
+        });
         slider_row(
             ui,
             &tr("settings-dim"),
             Some(&tr("settings-dim-help")),
             &mut d.dim,
             DIM_RANGE.0..=DIM_RANGE.1,
-            |v| {
-                if v <= 0.0 {
-                    tr("settings-dim-off")
-                } else {
-                    tr!("settings-percent", percent = (v * 100.0).round() as i64)
-                }
-            },
+            DIM,
+            boxes,
         );
         setting_row(
             ui,
@@ -687,7 +819,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
                 None,
                 &mut d.disappearing_ink_seconds,
                 INK_SECONDS_RANGE.0..=INK_SECONDS_RANGE.1,
-                |v| tr!("settings-seconds", seconds = (v * 10.0).round() / 10.0),
+                SECONDS,
+                boxes,
             );
         });
         let mut trail = u64::from(d.laser_trail_ms);
@@ -697,7 +830,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut trail,
             LASER_TRAIL_RANGE.0..=LASER_TRAIL_RANGE.1,
-            |v| tr!("settings-ms", ms = v.round() as u64),
+            MS,
+            boxes,
         );
         d.laser_trail_ms = trail as u32;
         setting_row(
@@ -723,6 +857,7 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
     let g = &mut app.settings.guides;
     section_card(ui, &tr("settings-guides"), None, |ui| {
         let (lo, hi) = GuideSettings::SPACING_RANGE;
+        let boxes = value_box_width(ui, "guides", || every_value(lo as f64..=hi as f64, 1.0, PX));
         let mut spacing = u64::from(g.spacing);
         slider_row(
             ui,
@@ -730,7 +865,8 @@ fn drawing(app: &mut SettingsApp, ui: &mut Ui) {
             None,
             &mut spacing,
             lo..=hi,
-            px,
+            PX,
+            boxes,
         );
         g.spacing = spacing as u32;
         setting_row(ui, &tr("settings-guides-on-shares"), None, |ui| {
@@ -846,6 +982,7 @@ fn capture(app: &mut SettingsApp, ui: &mut Ui) {
         if let Some(n) = chosen {
             c.format = formats[n];
         }
+        let boxes = value_box_width(ui, "capture", || every_value(1.0..=100.0, 1.0, PLAIN));
         ui.add_enabled_ui(c.format == ImageFormat::Jpg, |ui| {
             slider_row(
                 ui,
@@ -853,7 +990,8 @@ fn capture(app: &mut SettingsApp, ui: &mut Ui) {
                 None,
                 &mut c.jpg_quality,
                 1..=100,
-                |v| format!("{v:.0}"),
+                PLAIN,
+                boxes,
             );
         });
         setting_row(ui, &tr("settings-include-drawing"), None, |ui| {

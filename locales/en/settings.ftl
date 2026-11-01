@@ -74,6 +74,8 @@ settings-seconds =
 settings-laser-trail = Laser trail length
 # $ms: a number of milliseconds.
 settings-ms = { $ms } ms
+# A slider's box, to type its value in, for screen readers. $setting: the slider's name.
+settings-value-box = { $setting }: type a value
 settings-right-click-undoes = Right-click undoes
 settings-right-click-undoes-help = A right-click on the drawing undoes, as Ctrl+Z does. The mouse's right button only, not a pen's button or touch.
 
