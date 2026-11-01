@@ -486,6 +486,8 @@ fn a_width_steps_a_tenth_at_a_time_inside_its_range() {
 const RELEASED: &[(&str, &str)] = &[
     ("0.1.0-default", include_str!("released/0.1.0-default.toml")),
     ("0.1.0-changed", include_str!("released/0.1.0-changed.toml")),
+    ("0.2.0-default", include_str!("released/0.2.0-default.toml")),
+    ("0.2.0-changed", include_str!("released/0.2.0-changed.toml")),
 ];
 
 /// Every key `old` sets is in `new` with the same value. (`new` is the file as this version

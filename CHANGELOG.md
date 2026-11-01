@@ -6,6 +6,16 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
+Right-click to undo, and the tray icon's tooltip stays.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the exe
+("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt` first
+(`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with it), and
+if it matches, choose **More info**, then **Run anyway**. Installing it over 0.1.0 keeps your
+settings.
+
 ### Added
 
 - A right-click on the drawing undoes, as Ctrl+Z does (the mouse's right button only, never
