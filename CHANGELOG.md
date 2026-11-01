@@ -8,7 +8,7 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [0.2.0] - 2026-11-01
 
-Right-click to undo, and the tray icon's tooltip stays.
+Right-click to undo, a hotkey to capture a region, and the tray icon's tooltip stays.
 
 **Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the exe
 ("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt` first
@@ -20,6 +20,8 @@ settings.
 
 - A right-click on the drawing undoes, as Ctrl+Z does (the mouse's right button only, never
   mid-stroke). It's on by default; turn it off in Settings > Drawing.
+- A hotkey for **Capture a region**, Win+Shift+X by default: change it in Settings > General
+  beside Draw's. The tray menu and tooltip show it.
 
 ### Fixed
 

@@ -232,6 +232,64 @@ fn hotkeys_are_changed_and_conflicts_are_said() {
     assert_eq!(s.saved().backdrops.hotkey_whiteboard, "");
 }
 
+/// Capture a region's hotkey sits with the others and changes the same way: another app's key
+/// is refused with the nearest free one offered, another Overmark hotkey's key is refused, and
+/// what's chosen is saved and read back.
+#[test]
+fn capture_a_regions_hotkey_is_changed_like_the_others() {
+    use overmark_core::settings::DEFAULT_CAPTURE_REGION_HOTKEY;
+    let s = Setup::new();
+    let mut h = s.window(Page::General);
+    let region = tr("settings-hotkey-capture-region");
+    let change = tr!("settings-hotkey-change-named", action = region.as_str());
+    let shown = Hotkey::parse(DEFAULT_CAPTURE_REGION_HOTKEY)
+        .unwrap()
+        .unwrap()
+        .display();
+    h.get_by_label_contains(&shown);
+
+    // Win+Shift+J: another app has it. Win+Alt+J is offered, and taken.
+    let j = Hotkey::parse("Win+Shift+J").unwrap().unwrap();
+    s.fake.0.borrow_mut().taken.push(j);
+    h.get_by_label(&change).click();
+    h.run();
+    choose(&mut h, &tr("settings-hotkey-key"), "J");
+    h.get_by_label(&tr("settings-hotkey-use")).click();
+    h.run();
+    h.get_by_label_contains(&tr!("hotkey-taken", hotkey = j.display()));
+    assert_eq!(
+        s.saved().general.hotkey_capture_region,
+        DEFAULT_CAPTURE_REGION_HOTKEY,
+        "not taken"
+    );
+    h.get_by_label(&tr!("settings-hotkey-use-instead", hotkey = "Win+Alt+J"))
+        .click();
+    h.run();
+    assert_eq!(s.saved().general.hotkey_capture_region, "Win+Alt+J");
+
+    // Draw's key is Draw's.
+    h.get_by_label(&change).click();
+    h.run();
+    h.get_by_label(&tr("key-alt")).click();
+    h.get_by_label(&tr("key-shift")).click();
+    h.run();
+    choose(&mut h, &tr("settings-hotkey-key"), "D");
+    h.get_by_label(&tr("settings-hotkey-use")).click();
+    h.run();
+    h.get_by_label_contains(&tr!(
+        "hotkey-duplicate",
+        hotkey = "Win+Shift+D",
+        action = tr("settings-hotkey-draw").as_str()
+    ));
+    assert_eq!(s.saved().general.hotkey_capture_region, "Win+Alt+J");
+    h.get_by_label(&tr("settings-cancel")).click();
+    h.run();
+
+    // Read back as saved, by a new window.
+    let h = s.window(Page::General);
+    h.get_by_label_contains("Win+Alt+J");
+}
+
 /// What the tray found when it registered the hotkeys shows beside each.
 #[test]
 fn the_trays_hotkey_problems_show() {
@@ -239,9 +297,14 @@ fn the_trays_hotkey_problems_show() {
     let mut status = Status::default();
     status.set("general.hotkey_draw", State::Registered);
     status.set("general.hotkey_draw_frozen", State::Taken);
+    status.set("general.hotkey_capture_region", State::Taken);
     s.fake.0.borrow_mut().status = Some(status);
     let h = s.window(Page::General);
     h.get_by_label_contains(&tr!("hotkey-taken", hotkey = "Win+Shift+F"));
+    let region = Hotkey::parse(overmark_core::settings::DEFAULT_CAPTURE_REGION_HOTKEY)
+        .unwrap()
+        .unwrap();
+    h.get_by_label_contains(&tr!("hotkey-taken", hotkey = region.display()));
     assert!(
         h.query_by_label_contains(&tr!("hotkey-taken", hotkey = "Win+Shift+D"))
             .is_none()

@@ -14,6 +14,7 @@ fn changed() -> Settings {
     s.general.tray_click = TrayClick::Settings;
     s.general.hotkey_draw = "Ctrl+Shift+D".into();
     s.general.hotkey_draw_frozen = String::new();
+    s.general.hotkey_capture_region = "Ctrl+Shift+R".into();
     s.general.print_screen = PrintScreen::Frozen;
     s.drawing.default_tool = ToolKind::Highlighter;
     s.drawing.palette[8] = Colour {
@@ -66,6 +67,10 @@ fn the_defaults() {
     let s = Settings::default();
     assert_eq!(s.general.hotkey_draw, "Win+Shift+D");
     assert_eq!(s.general.hotkey_draw_frozen, "Win+Shift+F");
+    assert_eq!(
+        s.general.hotkey_capture_region,
+        DEFAULT_CAPTURE_REGION_HOTKEY
+    );
     assert_eq!(s.general.print_screen, PrintScreen::Off);
     assert_eq!(s.general.tray_click, TrayClick::Live);
     assert_eq!(s.drawing.palette.len(), PALETTE_SIZE);
@@ -565,8 +570,13 @@ fn every_released_versions_settings_load_and_keep_their_values() {
         let new: toml::Table = loaded.settings.to_documented_toml().parse().unwrap();
         assert_keeps("", &old, &new, name);
     }
-    // 0.1.0 had no right-click undo: either file takes its default.
+    // 0.1.0 had no right-click undo or Capture a region hotkey: either file takes the defaults.
     for (name, text) in &RELEASED[..2] {
-        assert!(parse(text).settings.drawing.right_click_undoes, "{name}");
+        let s = parse(text).settings;
+        assert!(s.drawing.right_click_undoes, "{name}");
+        assert_eq!(
+            s.general.hotkey_capture_region, DEFAULT_CAPTURE_REGION_HOTKEY,
+            "{name}"
+        );
     }
 }

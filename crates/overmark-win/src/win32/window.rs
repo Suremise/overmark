@@ -310,10 +310,18 @@ pub fn window_at(x: i32, y: i32) -> HWND {
     }
 }
 
+/// The calling thread's id, as [`WindowInfo::thread`] gives a window's.
+pub fn this_thread() -> u32 {
+    // SAFETY: no arguments.
+    unsafe { windows::Win32::System::Threading::GetCurrentThreadId() }
+}
+
 /// A top-level window of some process, as checks see it.
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
     pub hwnd: HWND,
+    /// The thread that made it.
+    pub thread: u32,
     pub class: String,
     pub title: String,
     pub visible: bool,
@@ -340,7 +348,7 @@ pub fn process_windows(pid: u32) -> Vec<WindowInfo> {
         unsafe {
             let found = &mut *(data.0 as *mut Found);
             let mut pid = 0;
-            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let thread = GetWindowThreadProcessId(hwnd, Some(&mut pid));
             if pid == found.pid {
                 let mut class = [0u16; 128];
                 let n = GetClassNameW(hwnd, &mut class).max(0) as usize;
@@ -360,6 +368,7 @@ pub fn process_windows(pid: u32) -> Vec<WindowInfo> {
                 let _ = GetWindowRect(hwnd, &mut rc);
                 found.out.push(WindowInfo {
                     hwnd,
+                    thread,
                     class: String::from_utf16_lossy(&class[..n]),
                     title: String::from_utf16_lossy(&title[..t]),
                     visible: IsWindowVisible(hwnd).as_bool(),

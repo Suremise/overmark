@@ -35,14 +35,16 @@ const ISSUES_URL: &str = "https://github.com/Suremise/overmark/issues";
 pub enum Slot {
     Draw,
     DrawFrozen,
+    CaptureRegion,
     Whiteboard,
     Blackboard,
 }
 
 impl Slot {
-    pub const ALL: [Slot; 4] = [
+    pub const ALL: [Slot; 5] = [
         Slot::Draw,
         Slot::DrawFrozen,
+        Slot::CaptureRegion,
         Slot::Whiteboard,
         Slot::Blackboard,
     ];
@@ -52,6 +54,7 @@ impl Slot {
         match self {
             Slot::Draw => "general.hotkey_draw",
             Slot::DrawFrozen => "general.hotkey_draw_frozen",
+            Slot::CaptureRegion => "general.hotkey_capture_region",
             Slot::Whiteboard => "backdrops.hotkey_whiteboard",
             Slot::Blackboard => "backdrops.hotkey_blackboard",
         }
@@ -61,6 +64,7 @@ impl Slot {
         tr(match self {
             Slot::Draw => "settings-hotkey-draw",
             Slot::DrawFrozen => "settings-hotkey-draw-frozen",
+            Slot::CaptureRegion => "settings-hotkey-capture-region",
             Slot::Whiteboard => "settings-hotkey-whiteboard",
             Slot::Blackboard => "settings-hotkey-blackboard",
         })
@@ -70,6 +74,7 @@ impl Slot {
         match self {
             Slot::Draw => &s.general.hotkey_draw,
             Slot::DrawFrozen => &s.general.hotkey_draw_frozen,
+            Slot::CaptureRegion => &s.general.hotkey_capture_region,
             Slot::Whiteboard => &s.backdrops.hotkey_whiteboard,
             Slot::Blackboard => &s.backdrops.hotkey_blackboard,
         }
@@ -79,6 +84,7 @@ impl Slot {
         match self {
             Slot::Draw => &mut s.general.hotkey_draw,
             Slot::DrawFrozen => &mut s.general.hotkey_draw_frozen,
+            Slot::CaptureRegion => &mut s.general.hotkey_capture_region,
             Slot::Whiteboard => &mut s.backdrops.hotkey_whiteboard,
             Slot::Blackboard => &mut s.backdrops.hotkey_blackboard,
         }

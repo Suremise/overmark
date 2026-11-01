@@ -42,6 +42,7 @@ layer, and the drawing goes with it: each time starts clean.
 |---|---|
 | **Win+Shift+D** | Draw (Live) |
 | **Win+Shift+F** | Draw on a frozen screen |
+| **Win+Shift+X** | Capture a region |
 | **F** | Freeze or unfreeze |
 | **W**, **Shift+W** | The next or previous backdrop: Live, Frozen, whiteboard, blackboard |
 | **G**, **Shift+G** | The next or previous guides: none, grid, dots, ruled lines |

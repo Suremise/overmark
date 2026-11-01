@@ -5,16 +5,19 @@
 ## from the end, so keep these short.
 
 # One of the hotkeys, under the name. $action: what it does, as the menu names it (tray-draw,
-# tray-draw-frozen, or a board's name); $hotkey: its keys ("Win+Shift+D").
+# tray-draw-frozen, tray-tooltip-capture-region, or a board's name); $hotkey: its keys
+# ("Win+Shift+D").
 tray-tooltip-shortcut = { $action }: { $hotkey }
 tray-tooltip-live = Overmark: drawing (Live)
 tray-tooltip-frozen = Overmark: drawing (Frozen)
 # Drawing on a whiteboard or blackboard; $backdrop is its name (backdrop-whiteboard, ...).
 tray-tooltip-board = Overmark: drawing ({ $backdrop })
+# Capture a region's hotkey, as the tooltip names it (the menu's item without its "…").
+tray-tooltip-capture-region = Capture a region
 # When no hotkey could be registered, or there are none.
 tray-tooltip-no-hotkey = Overmark: click to draw
 
-## Menu. The app adds the hotkeys beside the first two items.
+## Menu. The app adds the hotkeys beside the first three items.
 
 tray-draw = Draw
 tray-draw-frozen = Draw on a frozen screen

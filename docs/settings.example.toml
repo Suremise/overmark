@@ -13,6 +13,9 @@ tray_click = "live"
 hotkey_draw = "Win+Shift+D"
 # The hotkey that opens the layer on a frozen screen (default "Win+Shift+F"). "" turns it off.
 hotkey_draw_frozen = "Win+Shift+F"
+# The hotkey that captures a region, as the tray's Capture a region… does (default
+# "Win+Shift+X"). "" turns it off.
+hotkey_capture_region = "Win+Shift+X"
 # What Print Screen does: "off" (Windows keeps it; the default), "live" or "frozen". Windows 11
 # sends Print Screen to the Snipping Tool unless you turn that off in its Settings.
 print_screen = "off"

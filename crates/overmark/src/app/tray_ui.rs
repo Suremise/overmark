@@ -269,7 +269,7 @@ impl App {
 
     /// "Capture a region…": the screen frozen as it is, then a region chosen on it; the layer
     /// closes again once it's chosen or cancelled.
-    fn capture_region(&mut self) {
+    pub(super) fn capture_region(&mut self) {
         let was_open = self.overlay.is_some();
         if !was_open {
             self.open(Backdrop::Frozen, clock::now_100ns());
@@ -376,6 +376,10 @@ impl App {
             (
                 "general.hotkey_draw_frozen",
                 a.general.hotkey_draw_frozen != b.general.hotkey_draw_frozen,
+            ),
+            (
+                "general.hotkey_capture_region",
+                a.general.hotkey_capture_region != b.general.hotkey_capture_region,
             ),
             (
                 "general.print_screen",
@@ -536,7 +540,13 @@ pub fn menu_items(
             MENU_DRAW_FROZEN,
             label("tray-draw-frozen", &settings.general.hotkey_draw_frozen),
         ),
-        command(MENU_CAPTURE_REGION, tr("tray-capture-region")),
+        command(
+            MENU_CAPTURE_REGION,
+            label(
+                "tray-capture-region",
+                &settings.general.hotkey_capture_region,
+            ),
+        ),
         MenuItem::Separator,
         command(MENU_OPEN_CAPTURES, tr("tray-open-captures")),
         command(MENU_SETTINGS, tr("tray-settings")),
@@ -579,7 +589,7 @@ mod tests {
         }
     }
 
-    /// The menu is in its set order, with the hotkeys beside the first two; Check
+    /// The menu is in its set order, with the hotkeys beside the first three; Check
     /// for updates… is there only when it's turned on.
     #[test]
     fn the_menu_is_in_its_order() {
@@ -590,7 +600,7 @@ mod tests {
             [
                 "Draw\tWin+Shift+D",
                 "Draw on a frozen screen\tWin+Shift+F",
-                "Capture a region…",
+                "Capture a region…\tWin+Shift+X",
                 "---",
                 "Open captures folder",
                 "Settings…",
@@ -602,8 +612,10 @@ mod tests {
         );
         settings.advanced.check_for_updates = true;
         settings.general.hotkey_draw.clear();
+        settings.general.hotkey_capture_region.clear();
         let on = texts(&menu_items(&settings, false, label));
         assert_eq!(on[0], "Draw");
+        assert_eq!(on[2], "Capture a region…");
         assert_eq!(on[6], "Start with Windows");
         assert_eq!(&on[8..], ["Check for updates…", "About Overmark", "Quit"]);
     }

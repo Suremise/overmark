@@ -564,7 +564,11 @@ mod tests {
     #[test]
     fn every_default_hotkey_parses() {
         let s = crate::settings::Settings::default();
-        for text in [&s.general.hotkey_draw, &s.general.hotkey_draw_frozen] {
+        for text in [
+            &s.general.hotkey_draw,
+            &s.general.hotkey_draw_frozen,
+            &s.general.hotkey_capture_region,
+        ] {
             assert!(matches!(Hotkey::parse(text), Ok(Some(_))), "{text}");
         }
     }

@@ -59,9 +59,15 @@ pub struct GeneralSettings {
     pub hotkey_draw: String,
     /// The hotkey that opens the layer Frozen. Empty: none.
     pub hotkey_draw_frozen: String,
+    /// The hotkey that captures a region, as the tray's "Capture a region…" does. Empty: none.
+    pub hotkey_capture_region: String,
     /// What Print Screen does, if anything.
     pub print_screen: PrintScreen,
 }
+
+/// Capture a region's hotkey unless it's changed: not one Windows 10 or 11 uses (Win+Shift+S is
+/// the Snipping Tool's), and no Ctrl+Alt, which is AltGr on many keyboards.
+pub const DEFAULT_CAPTURE_REGION_HOTKEY: &str = "Win+Shift+X";
 
 impl Default for GeneralSettings {
     fn default() -> Self {
@@ -70,6 +76,7 @@ impl Default for GeneralSettings {
             tray_click: TrayClick::Live,
             hotkey_draw: "Win+Shift+D".to_owned(),
             hotkey_draw_frozen: "Win+Shift+F".to_owned(),
+            hotkey_capture_region: DEFAULT_CAPTURE_REGION_HOTKEY.to_owned(),
             print_screen: PrintScreen::Off,
         }
     }
@@ -734,6 +741,13 @@ impl Settings {
             "The hotkey that opens the layer on a frozen screen (default \"Win+Shift+F\"). \"\" turns it off.",
             "hotkey_draw_frozen",
             &str_value(&g.hotkey_draw_frozen),
+        );
+        w.key(
+            &format!(
+                "The hotkey that captures a region, as the tray's Capture a region… does (default\n\"{DEFAULT_CAPTURE_REGION_HOTKEY}\"). \"\" turns it off."
+            ),
+            "hotkey_capture_region",
+            &str_value(&g.hotkey_capture_region),
         );
         w.key(
             "What Print Screen does: \"off\" (Windows keeps it; the default), \"live\" or \"frozen\". Windows 11\nsends Print Screen to the Snipping Tool unless you turn that off in its Settings.",

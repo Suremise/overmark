@@ -16,6 +16,8 @@ pub enum Action {
     Draw,
     /// Open the layer Frozen.
     DrawFrozen,
+    /// Capture a region, as the tray's "Capture a region…" does.
+    CaptureRegion,
     /// Open the layer on the whiteboard (Settings' `backdrops.hotkey_whiteboard`, unset by
     /// default).
     DrawWhiteboard,
@@ -297,6 +299,51 @@ mod tests {
         assert_ne!(not_that, near);
         drop(held);
         assert!(is_free(&rare));
+    }
+
+    /// The hotkey window this test's thread made (the crate's `global_hotkey_app`): never
+    /// another process's or test's, so a running Overmark's is never touched.
+    fn own_hotkey_window() -> windows::Win32::Foundation::HWND {
+        use crate::win32::window;
+        window::process_windows(std::process::id())
+            .into_iter()
+            .find(|w| w.class == "global_hotkey_app" && w.thread == window::this_thread())
+            .expect("the hotkey window")
+            .hwnd
+    }
+
+    /// Capture a region's hotkey comes back as its action: a `WM_HOTKEY` posted to this
+    /// thread's own hotkey window, as Windows sends it (no global input), for a rare key the
+    /// test registers and frees.
+    #[test]
+    fn capture_a_region_comes_from_its_hotkey() {
+        use windows::Win32::UI::WindowsAndMessaging::WM_HOTKEY;
+        let mut hotkeys = Hotkeys::new().unwrap();
+        let rare = (13..=22)
+            .map(|n| {
+                Hotkey::parse(&format!("Win+Alt+Shift+F{n}"))
+                    .unwrap()
+                    .unwrap()
+            })
+            .find(|h| hotkeys.register(Action::CaptureRegion, h).is_ok())
+            .expect("a free Win+Alt+Shift+F13-F22");
+        let id = to_hotkey(&rare).id() as usize;
+        assert!(crate::win32::window::post(
+            own_hotkey_window(),
+            WM_HOTKEY,
+            id,
+            0
+        ));
+        let mut pressed = Vec::new();
+        for _ in 0..100 {
+            crate::win32::window::pump();
+            pressed.extend(hotkeys.take_pressed().into_iter().map(|(a, _)| a));
+            if !pressed.is_empty() {
+                break;
+            }
+            crate::win32::window::wait_for_message(50);
+        }
+        assert_eq!(pressed, [Action::CaptureRegion]);
     }
 
     #[test]

@@ -120,6 +120,7 @@ fn action_name(action: Action) -> String {
     match action {
         Action::Draw => tr("tray-draw"),
         Action::DrawFrozen => tr("tray-draw-frozen"),
+        Action::CaptureRegion => tr("tray-tooltip-capture-region"),
         Action::DrawWhiteboard => Backdrop::Whiteboard.name(),
         Action::DrawBlackboard => Backdrop::Blackboard.name(),
     }
@@ -220,6 +221,11 @@ impl App {
                 Action::DrawFrozen,
                 "general.hotkey_draw_frozen",
                 general.hotkey_draw_frozen.clone(),
+            ),
+            (
+                Action::CaptureRegion,
+                "general.hotkey_capture_region",
+                general.hotkey_capture_region.clone(),
             ),
             (
                 Action::DrawWhiteboard,
@@ -823,6 +829,11 @@ impl App {
             .unwrap_or_default();
         for (action, at) in pressed {
             let backdrop = match action {
+                // Exactly as the tray's item: the screen frozen, then a region chosen on it.
+                Action::CaptureRegion => {
+                    self.capture_region();
+                    continue;
+                }
                 Action::Draw => Backdrop::Live,
                 Action::DrawFrozen => Backdrop::Frozen,
                 Action::DrawWhiteboard => Backdrop::Whiteboard,
@@ -1324,6 +1335,35 @@ mod tests {
             "Overmark\nDraw on a frozen screen: Win+Shift+F"
         );
         assert_eq!(super::tooltip_text(None, &[]), "Overmark: click to draw");
+    }
+
+    /// Capture a region's line names it without the menu's "…", and every default hotkey's
+    /// line fits whole, with room for a board's.
+    #[test]
+    fn the_tooltip_lists_capture_a_region() {
+        use overmark_core::settings::GeneralSettings;
+        use overmark_win::hotkeys::Action;
+        overmark_core::i18n::init("en");
+        let g = GeneralSettings::default();
+        let all: Vec<(String, String)> = [
+            (Action::Draw, &g.hotkey_draw),
+            (Action::DrawFrozen, &g.hotkey_draw_frozen),
+            (Action::CaptureRegion, &g.hotkey_capture_region),
+            (Action::DrawWhiteboard, &"Ctrl+Shift+W".to_owned()),
+        ]
+        .into_iter()
+        .map(|(a, h)| (super::action_name(a), h.clone()))
+        .collect();
+        let text = super::tooltip_text(None, &all);
+        assert_eq!(
+            text,
+            format!(
+                "Overmark\nDraw: Win+Shift+D\nDraw on a frozen screen: Win+Shift+F\n\
+                 Capture a region: {}\nWhiteboard: Ctrl+Shift+W",
+                g.hotkey_capture_region
+            )
+        );
+        assert!(text.encode_utf16().count() <= super::TOOLTIP_MAX);
     }
 
     /// Drawing: the state first, the hotkeys under it.

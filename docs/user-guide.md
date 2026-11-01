@@ -147,8 +147,8 @@ In Settings (Capture) you can change:
 - whether captures **include the drawing** by default (Ctrl+Shift+Alt+S always leaves it out);
 - whether the **notice** shows.
 
-From the tray, **Capture a region…** freezes the screen, lets you choose a region, and closes the
-layer again once it's captured.
+From the tray, **Capture a region…**, or its hotkey **Win+Shift+X** from anywhere, freezes the
+screen, lets you choose a region, and closes the layer again once it's captured.
 
 ## The toolbar
 
@@ -214,7 +214,7 @@ while you draw, whether it's Live, Frozen or a board.
   |---|---|
   | **Draw** | Opens the layer Live (its hotkey beside it) |
   | **Draw on a frozen screen** | Opens it Frozen |
-  | **Capture a region…** | Freezes the screen and lets you choose a region to capture |
+  | **Capture a region…** | Freezes the screen and lets you choose a region to capture (its hotkey beside it) |
   | **Open captures folder** | Opens the folder captures go to |
   | **Settings…** | Opens Settings |
   | **Start with Windows** | Ticked when Overmark starts as you sign in; click to change it |
@@ -232,7 +232,8 @@ once** and is saved: there's no Save button. Changes to the drawing (a width, th
 apply even while the layer is open.
 
 - **General:** Start with Windows; what clicking the tray icon does; the **hotkeys** (Draw, Draw
-  on a frozen screen, and the whiteboard's and blackboard's, which are off until you set them);
+  on a frozen screen, Capture a region, and the whiteboard's and blackboard's, which are off
+  until you set them);
   and **Print Screen**. See [Hotkeys and Print Screen](#hotkeys-and-print-screen).
 - **Drawing:** the tool the layer starts with; the **palette** (click a colour to change it) and
   the colour it starts with; each tool's **starting width**; the **dim** (0 turns it off);
@@ -352,6 +353,7 @@ press the keys.
 |---|---|
 | **Win+Shift+D** | Open the layer, Live |
 | **Win+Shift+F** | Open it on a frozen screen |
+| **Win+Shift+X** | Capture a region |
 | **Print Screen** | Off by default; can open the layer (see above) |
 
 **While the layer is open:**

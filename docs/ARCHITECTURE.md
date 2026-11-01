@@ -328,7 +328,9 @@ another launch sets), so it uses no CPU in the tray.
   (`hotkey taken by another app`, the notice shown, Win+Shift+F still registered).
 - **Checked on this PC** (Windows 11 25H2, build 26200): **Win+Shift+D and Win+Shift+F are both
   free**; they register at start-up. Windows 10 isn't tested here. (Win+Shift+F23 is taken: it is
-  what the Copilot key sends.)
+  what the Copilot key sends.) **Capture a region's Win+Shift+X** was free too, where
+  Win+Shift+C, R and W were already taken; Win+Shift+A is Windows 11's own (it focuses an
+  on-screen tip), and Win+Shift+S the Snipping Tool's.
 - **Per-monitor DPI awareness v2** at start-up (`SetProcessDpiAwarenessContext`); the manifest
   will say the same once the exe has its resources.
 
@@ -1342,13 +1344,13 @@ the theme, the DPI or Explorer changes (`WM_SETTINGCHANGE`, `WM_THEMECHANGED`, `
 - **Clicks:** a click does what Settings says (Live, Frozen or Settings). As a double-click opens
   Settings, a click that opens the layer waits for Windows' double-click time first (500 ms by
   default), so a double-click opens Settings and nothing else; Enter on the icon acts at once.
-- **The menu** has the hotkeys beside Draw and Draw on a frozen screen, and
+- **The menu** has the hotkeys beside Draw, Draw on a frozen screen and Capture a region…, and
   Start with Windows ticked from the Run value. "Check for updates…" is there only when it's on.
   "Capture a region…" freezes the screen, lets the region be chosen, and closes the layer after.
 - **Balloons:** a hotkey notice opens Settings when clicked; a new release's opens its page.
-- **Hotkeys:** Draw, Draw Frozen and Print Screen (Off, Live or Frozen) are registered with
-  `RegisterHotKey`, with the whiteboard's and blackboard's; what became of each is
-  published for Settings (below).
+- **Hotkeys:** Draw, Draw Frozen, Capture a region and Print Screen (Off, Live or Frozen) are
+  registered with `RegisterHotKey`, with the whiteboard's and blackboard's; what became of each
+  is published for Settings (below).
 
 **Settings is a process of its own** (`overmark.exe --settings`, `--about` for About), started
 by the tray and gone when closed, as the grabber is. egui with its GL context keeps 75 MB
