@@ -102,6 +102,26 @@ thread_local! {
     static READD: RefCell<Option<NOTIFYICONDATAW>> = const { RefCell::new(None) };
 }
 
+/// How the tray reaches `Shell_NotifyIconW`: the real call, or a test's recorder.
+type Shell = fn(NOTIFY_ICON_MESSAGE, &NOTIFYICONDATAW) -> bool;
+
+fn real_shell(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
+    // SAFETY: `data` is a fully initialised NOTIFYICONDATAW for our own window.
+    unsafe { Shell_NotifyIconW(message, data) }.as_bool()
+}
+
+/// Adds the icon again, as it last showed (icon and tooltip), after Explorer restarts.
+fn add_again(shell: Shell) {
+    READD.with(|r| {
+        if let Some(data) = r.borrow().as_ref() {
+            let _ = shell(NIM_ADD, data);
+            let mut v = *data;
+            v.Anonymous.uVersion = NOTIFYICON_VERSION_4;
+            let _ = shell(NIM_SETVERSION, &v);
+        }
+    });
+}
+
 extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == CALLBACK {
         match (lparam.0 as u32) & 0xFFFF {
@@ -125,17 +145,7 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         push(TrayEvent::ThemeChanged);
     }
     if msg == taskbar_created() {
-        READD.with(|r| {
-            if let Some(data) = r.borrow().as_ref() {
-                // SAFETY: a fully initialised NOTIFYICONDATAW for our own window.
-                unsafe {
-                    let _ = Shell_NotifyIconW(NIM_ADD, data);
-                    let mut v = *data;
-                    v.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-                    let _ = Shell_NotifyIconW(NIM_SETVERSION, &v);
-                }
-            }
-        });
+        add_again(real_shell);
         // The new taskbar may have another theme or DPI.
         push(TrayEvent::ThemeChanged);
     }
@@ -337,12 +347,17 @@ pub struct Tray {
     light: bool,
     size: u32,
     tip: String,
+    shell: Shell,
     _not_send: PhantomData<*const ()>,
 }
 
 impl Tray {
     /// Adds `icon` (its variant for the taskbar's theme) with the tooltip `tip`.
     pub fn new(icon: ThemedIcon, tip: &str) -> windows::core::Result<Tray> {
+        Tray::with_shell(icon, tip, real_shell)
+    }
+
+    fn with_shell(icon: ThemedIcon, tip: &str, shell: Shell) -> windows::core::Result<Tray> {
         let hwnd = hidden_window()?;
         let light = taskbar_is_light();
         let size = small_icon_size(hwnd);
@@ -362,6 +377,7 @@ impl Tray {
             light,
             size,
             tip: tip.to_owned(),
+            shell,
             _not_send: PhantomData,
         };
         tray.add()?;
@@ -416,12 +432,15 @@ impl Tray {
         shown
     }
 
+    /// The icon's data, with `flags` and always the tooltip: under `NOTIFYICON_VERSION_4`
+    /// Windows hides the standard tooltip unless `NIF_SHOWTIP` is set, and any `NIM_MODIFY`
+    /// without it (a new icon, a balloon) turns the tooltip off until the next one with it.
     fn data(&self, flags: NOTIFY_ICON_DATA_FLAGS) -> NOTIFYICONDATAW {
         let mut data = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: self.hwnd,
             uID: 1,
-            uFlags: flags,
+            uFlags: flags | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage: CALLBACK,
             hIcon: self.icon.0,
             ..Default::default()
@@ -435,8 +454,7 @@ impl Tray {
         message: NOTIFY_ICON_MESSAGE,
         data: &NOTIFYICONDATAW,
     ) -> windows::core::Result<()> {
-        // SAFETY: `data` is a fully initialised NOTIFYICONDATAW for our window.
-        if unsafe { Shell_NotifyIconW(message, data) }.as_bool() {
+        if (self.shell)(message, data) {
             Ok(())
         } else {
             Err(windows::core::Error::new(
@@ -447,7 +465,7 @@ impl Tray {
     }
 
     fn add(&self) -> windows::core::Result<()> {
-        let mut data = self.data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
+        let mut data = self.data(NIF_MESSAGE | NIF_ICON);
         READD.with(|r| *r.borrow_mut() = Some(data));
         self.notify(NIM_ADD, &data)?;
         data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
@@ -459,7 +477,7 @@ impl Tray {
             return Ok(());
         }
         self.tip = tip.to_owned();
-        let data = self.data(NIF_TIP | NIF_SHOWTIP);
+        let data = self.data(NOTIFY_ICON_DATA_FLAGS(0));
         READD.with(|r| {
             if let Some(d) = r.borrow_mut().as_mut() {
                 d.szTip = data.szTip;
@@ -788,6 +806,98 @@ mod tests {
     use super::*;
 
     const IDLE: &[u8] = include_bytes!("../../../../assets/tray/idle-on-light.ico");
+    const LIVE: &[u8] = include_bytes!("../../../../assets/tray/live-on-light.ico");
+
+    thread_local! {
+        /// What the recording shell was sent: (message, flags, tooltip).
+        static SENT: RefCell<Vec<(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    fn record(message: NOTIFY_ICON_MESSAGE, data: &NOTIFYICONDATAW) -> bool {
+        let end = data
+            .szTip
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(data.szTip.len());
+        let tip = String::from_utf16_lossy(&data.szTip[..end]);
+        SENT.with(|s| s.borrow_mut().push((message, data.uFlags, tip)));
+        true
+    }
+
+    /// Takes what was sent since the last call.
+    fn sent() -> Vec<(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)> {
+        SENT.with(|s| std::mem::take(&mut *s.borrow_mut()))
+    }
+
+    /// Asserts each message sent carries the tooltip, shown, with the text `tip`.
+    fn assert_tip_kept(sent: &[(NOTIFY_ICON_MESSAGE, NOTIFY_ICON_DATA_FLAGS, String)], tip: &str) {
+        assert!(!sent.is_empty());
+        for (message, flags, text) in sent {
+            assert!(
+                flags.contains(NIF_TIP | NIF_SHOWTIP),
+                "{message:?}: {flags:?}"
+            );
+            assert_eq!(text, tip, "{message:?}");
+        }
+    }
+
+    /// Under `NOTIFYICON_VERSION_4` a modify without `NIF_SHOWTIP` hides the tooltip: every
+    /// change (a new icon, a balloon, a new tooltip) and the re-add after Explorer restarts keep
+    /// it. (A recording shell: no icon is shown.)
+    #[test]
+    fn every_change_keeps_the_tooltip_showing() {
+        let idle = ThemedIcon {
+            light_taskbar: IconFile(IDLE),
+            dark_taskbar: IconFile(IDLE),
+        };
+        let live = ThemedIcon {
+            light_taskbar: IconFile(LIVE),
+            dark_taskbar: IconFile(LIVE),
+        };
+        let mut tray = Tray::with_shell(idle, "Overmark", record).unwrap();
+        let added = sent();
+        assert_eq!(added[0].0, NIM_ADD);
+        assert_tip_kept(&added[..1], "Overmark");
+
+        for icon in [live, idle, live] {
+            tray.set_icon(icon).unwrap();
+            let changed = sent();
+            assert!(changed.iter().all(|s| s.0 == NIM_MODIFY));
+            assert!(changed.iter().any(|s| s.1.contains(NIF_ICON)));
+            assert_tip_kept(&changed, "Overmark");
+        }
+
+        tray.balloon("Saved", "A capture", BalloonKind::Info)
+            .unwrap();
+        let ballooned = sent();
+        assert!(ballooned.iter().any(|s| s.1.contains(NIF_INFO)));
+        assert_tip_kept(&ballooned, "Overmark");
+
+        tray.set_tooltip(
+            "Overmark
+Ctrl+Shift+D: draw",
+        )
+        .unwrap();
+        assert_tip_kept(
+            &sent(),
+            "Overmark
+Ctrl+Shift+D: draw",
+        );
+
+        add_again(record);
+        let again = sent();
+        assert_eq!(again[0].0, NIM_ADD);
+        assert!(again[0].1.contains(NIF_ICON | NIF_MESSAGE));
+        assert_tip_kept(
+            &again,
+            "Overmark
+Ctrl+Shift+D: draw",
+        );
+
+        drop(tray);
+        sent();
+    }
 
     #[test]
     fn a_second_instance_asks_the_first_to_open() {

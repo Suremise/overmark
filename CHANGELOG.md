@@ -6,6 +6,11 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- The tray icon's tooltip stays after drawing: it went once the icon first changed (opening
+  the layer, a balloon, a theme or DPI change) and didn't come back.
+
 ## [0.1.0] - 2026-11-01
 
 The first release: draw over your screen, Live or Frozen, then capture it.
