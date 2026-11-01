@@ -1,0 +1,4 @@
+# The C runtime is linked into the exe, so it needs no Visual C++ redistributable (an admin
+# install) on a clean PC. scripts/package.ps1 checks the exe imports no C runtime DLL.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

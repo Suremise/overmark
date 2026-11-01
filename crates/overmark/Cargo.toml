@@ -1,0 +1,42 @@
+[package]
+name = "overmark"
+description = "Overmark: draw on your screen, then capture it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+overmark-core.workspace = true
+overmark-win.workspace = true
+kurbo.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# The egui windows' shared look (src/ui/): it uses Windows' own fonts, so it is Windows-only.
+eframe.workspace = true
+# The Settings window: its folder picker, and its title bar's icon decoded from the PNG.
+rfd.workspace = true
+image.workspace = true
+# The toolbar's window handle.
+windows.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# The screenshot harness (tests/ui_shots.rs) and the components' accessibility tests.
+egui_kittest = { workspace = true, features = ["wgpu"] }
+# examples/resident_check.rs drives the exe through its own windows.
+windows.workspace = true
+arboard.workspace = true
+# examples/demo_clip.rs draws the README clip's desktop (already in the app, through core).
+tiny-skia.workspace = true
+
+[build-dependencies]
+# The exe's icon and version resource (build.rs): build-only, not shipped.
+embed-resource.workspace = true
+
+[lints]
+workspace = true

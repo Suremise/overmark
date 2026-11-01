@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Overmark's MSI (WiX v5). One MSI for both:
+    - per user, no admin (the default): to %LOCALAPPDATA%\Programs\Overmark;
+    - per machine, for IT (Intune, SCCM), from an elevated command line:
+        msiexec /i overmark-<version>-x64.msi ALLUSERS=1 /qn
+      to %ProgramFiles%\Overmark, for every user.
+  It's a dual-purpose package (Scope="perUserOrMachine": ALLUSERS=2 with MSIINSTALLPERUSER=1),
+  so ProgramFiles64Folder is %LOCALAPPDATA%\Programs in a per-user install, and HKMU is HKCU in a
+  per-user install and HKLM in a per-machine one.
+
+  Start with Windows, optional: STARTWITHWINDOWS=1 writes the Run value "Overmark" (the name the
+  app's own Start with Windows setting uses), in HKCU for a per-user install and HKLM (every user)
+  for a per-machine one:
+      msiexec /i overmark-<version>-x64.msi STARTWITHWINDOWS=1
+  Uninstalling removes it.
+
+  Built by scripts/package.ps1:
+    wix build installer/overmark.wxs -arch x64 -d Version=<x.y.z> -d Stage=<folder>
+      -d DowngradeMessage=<text> -d ShortcutDescription=<text> -o <msi>
+  where <folder> holds overmark.exe, LICENSE.txt and THIRD-PARTY-NOTICES.txt.
+
+  It uses no WiX extension and no WixUI: their dialogs, bitmaps and custom-action DLLs are MS-RL,
+  and would be embedded in the MSI, against the licence rule. Windows shows its own progress window.
+
+  Its own text comes from locales/en/installer.ftl: package.ps1 passes it in and checks the built
+  MSI carries it.
+
+  An interactive per-user install opens Overmark, so its tray icon shows it worked; a silent one
+  (/qn), and a per-machine one (it runs elevated), start nothing. Uninstalling leaves the
+  settings and logs in %APPDATA%\Overmark.
+
+  Adapted from Legible's installer/legible.wxs.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Overmark"
+      Manufacturer="Darren Marshall"
+      Version="$(var.Version)"
+      UpgradeCode="56F09855-61B6-419E-949A-FF7DB0ABD30F"
+      Scope="perUserOrMachine"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <!-- Every build has a new ProductCode, often with the same Version: an equal version is an
+         upgrade too, or a rebuilt MSI installs beside the old one. The old installs are removed
+         first (afterInstallInitialize), so nothing of theirs is left behind. WiX warns ICE61
+         about same-version upgrades: that's this choice, not a mistake. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="$(var.DowngradeMessage)" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="OvermarkIcon" SourceFile="$(sys.SOURCEFILEDIR)..\assets\icon\overmark.ico" />
+    <Property Id="ARPPRODUCTICON" Value="OvermarkIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Suremise/overmark" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Overmark" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Components keep their key path under HKMU (HKCU per user, HKLM per machine). -->
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <Component Id="OvermarkExe" Guid="052FB91B-4EC9-40A6-A132-5069F99E9278">
+        <File Id="OvermarkExe" Source="$(var.Stage)\overmark.exe" />
+        <RegistryValue Root="HKMU" Key="Software\Overmark\Installer" Name="OvermarkExe" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+      </Component>
+      <Component Id="Licence" Guid="4DD93E97-CF5C-4A4B-BB65-5C5B12364FB9">
+        <File Id="Licence" Source="$(var.Stage)\LICENSE.txt" />
+        <RegistryValue Root="HKMU" Key="Software\Overmark\Installer" Name="Licence" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="Notices" Guid="1B80B77F-72E3-47F7-989A-E0C6B688B366">
+        <File Id="Notices" Source="$(var.Stage)\THIRD-PARTY-NOTICES.txt" />
+        <RegistryValue Root="HKMU" Key="Software\Overmark\Installer" Name="Notices" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <!-- Start with Windows, only when asked (STARTWITHWINDOWS=1). The value's name is the one
+           the app's own setting writes and removes. -->
+      <Component Id="StartWithWindows" Guid="8013B1C3-C7D7-4208-8F35-5A6E41EF7F97" Condition="STARTWITHWINDOWS = 1">
+        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Overmark"
+                       Type="string" Value="&quot;[INSTALLFOLDER]overmark.exe&quot;" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Shortcuts" Directory="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="E1075100-D98E-498E-A7CB-2D71B4A38CF1">
+        <Shortcut Id="StartMenuShortcut" Name="Overmark" Description="$(var.ShortcutDescription)"
+                  Target="[INSTALLFOLDER]overmark.exe" WorkingDirectory="INSTALLFOLDER" Icon="OvermarkIcon" />
+        <RegistryValue Root="HKMU" Key="Software\Overmark\Installer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Overmark" Level="1">
+      <ComponentGroupRef Id="Files" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+
+    <!-- After an interactive per-user install or upgrade, Overmark starts, so its tray icon
+         shows it worked. A silent or basic-UI one (/qn, /qb: UILevel 2 or 3) starts nothing, and
+         nor does a per-machine one, which runs elevated (Privileged): the tray app must run as
+         the user. -->
+    <CustomAction Id="LaunchOvermark" FileRef="OvermarkExe" ExeCommand=""
+                  Execute="immediate" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchOvermark" After="InstallFinalize" Condition="UILevel &gt; 3 AND NOT (REMOVE~=&quot;ALL&quot;) AND NOT Privileged" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

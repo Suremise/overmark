@@ -1,0 +1,27 @@
+# cargo-nextest's settings. nextest runs every test as its own process, all binaries side by
+# side. `cargo test --workspace` still works, and still runs the doc tests, which nextest
+# doesn't. docs/TESTING.md says what to run when.
+
+[store]
+dir = "target/nextest"
+
+[profile.default]
+# A test still running after a minute is reported as slow; after five, it's stopped as hung.
+slow-timeout = { period = "60s", terminate-after = 5 }
+# Every failure in one run, not only the first.
+fail-fast = false
+
+# Tests that must take turns, as their own process each: anything that touches state the OS
+# shares between processes. Put such a test's binary in one of these groups with an override
+# (`[[profile.default.overrides]]`, `filter = "package(...) and binary(...)"`); never a lock of
+# its own (an in-process Mutex doesn't make processes take turns).
+[test-groups]
+# The real clipboard: one owner at a time.
+clipboard = { max-threads = 1 }
+# The current user's Run key (Start with Windows).
+autostart = { max-threads = 1 }
+
+# CI: the same tests; a hung test is stopped sooner, so the job isn't held for long.
+[profile.ci]
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 3 }

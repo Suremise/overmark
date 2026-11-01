@@ -1,0 +1,20 @@
+# OS and editor files
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+
+# Logs
+*.log
+logs/
+
+# Build output
+target/
+
+# Local builds, never committed
+/dist/
+
+# Personal notes for Claude Code on this PC (AGENTS.md has the shared ones)
+CLAUDE.local.md

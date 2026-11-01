@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = ["crates/overmark-core", "crates/overmark-win", "crates/overmark"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Darren Marshall"]
+publish = false
+
+# Every dependency's version is set here once; crates take it with `workspace = true`.
+# Add a crate only when a change needs it (docs/ARCHITECTURE.md, Crate check).
+[workspace.dependencies]
+overmark-core = { path = "crates/overmark-core" }
+overmark-win = { path = "crates/overmark-win" }
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
+tracing = "0.1.44"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+parley = { version = "0.12.0", default-features = false, features = ["std"] }
+swash = { version = "0.2.10", default-features = false, features = ["std", "scale"] }
+kurbo = { version = "0.13.1", default-features = false, features = ["std"] }
+tempfile = "3.27.0"
+windows = "0.62.2"
+global-hotkey = "0.9.0"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+arboard = { version = "3.7.0", default-features = false, features = ["image-data"] }
+# The toolbar and Settings windows (docs/ARCHITECTURE.md, The windows' look): no
+# `default_fonts`, whose fonts are OFL and Ubuntu-licensed (the licence rule).
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "glow"] }
+egui_kittest = { version = "0.37.0", default-features = false }
+# Settings' folder picker (the Windows file dialog through COM), as Replica uses it.
+rfd = { version = "0.17.2", default-features = false }
+# The toolbar's accessibility on Windows: AccessKit's own adapter, egui's AccessKit.
+accesskit = "0.25.2"
+accesskit_windows = "0.35.2"
+# The exe's icon and version resource (crates/overmark/build.rs): build-only, not shipped.
+embed-resource = "3.0.12"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
+
+# Dev and test builds: line tables only for the workspace's crates, so panics and test
+# failures still show file and line, and no debug info for the dependencies. A full test build's
+# target\debug is less than half the size (docs/TESTING.md, Disk space). Release is unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

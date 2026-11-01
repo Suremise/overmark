@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in Overmark doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting it. **A security problem?** Please don't open an issue: report it privately, as [SECURITY.md](https://github.com/Suremise/overmark/blob/main/SECURITY.md) says.
+
+        Before attaching a screenshot or a capture, check it for things you'd rather keep private: what was on your screen, names, and folder names in paths.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. A screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to show it
+      description: The hotkeys you pressed, the tool, the mode (Live or Frozen) and what you drew or saved.
+      placeholder: |
+        1. Press Win+Shift+F
+        2. Pick the highlighter (H) and draw over some text
+        3. Press Ctrl+S
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      description: The Overmark version (Settings > About), installed or portable, the Windows version, your monitors and their scaling (100%, 150%...), and a pen tablet if you use one.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The log
+      description: If Overmark closed or did something odd, the newest file in `logs\` (in `%APPDATA%\Overmark\`, or beside overmark.exe for a portable copy). Logs hold file paths, so check them first.
+      render: text
