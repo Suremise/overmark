@@ -29,6 +29,8 @@ and the rules every test keeps.
 
 A pull request must pass all of these. CI runs them on Windows for every push to `main` and every
 pull request, and runs `overmark-core`'s tests on Linux too, to keep the core platform-free.
+A push or pull request that changes only docs and pictures (the `paths-ignore` list in
+`.github/workflows/ci.yml`) doesn't run CI.
 
 **Disk space.** Cargo never removes old test exes, so `pwsh scripts/clean-build.ps1` now and then
 frees what piles up in `target\` while keeping the compiled dependencies.

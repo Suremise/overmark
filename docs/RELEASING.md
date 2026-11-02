@@ -50,7 +50,8 @@ yet, so Windows SmartScreen warns about both (see the checklist).
    tests, builds the exe, the MSI, the zip and the checksums, and **drafts** a GitHub release
    with them and the notices, its notes the version's section of `CHANGELOG.md` (it fails if
    there isn't one). CI (`ci.yml`) has already run fmt, clippy, the tests, `cargo deny` and
-   `overmark-core` on Linux for the push.
+   `overmark-core` on Linux for the push (a release commit changes the version, so CI runs for
+   it; a push that changes only docs and pictures doesn't run CI).
 5. **Run the manual checklist** below on the draft's files, on a test machine or account.
 6. **Publish the draft** once the checklist passes.
 

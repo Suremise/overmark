@@ -3,7 +3,28 @@ name: CI
 on:
   push:
     branches: [main]
+    # A push or pull request that changes only these files skips CI: none of them is built,
+    # embedded or read by a test. Kept in on purpose: LICENSE (build.rs reads it),
+    # THIRD-PARTY-NOTICES.txt (compiled into the Settings window), docs/settings.example.toml
+    # (a test checks it is current), assets/icon, assets/tray and assets/export.py (the icons
+    # are compiled in), and .github/workflows (CI must run on its own changes).
+    paths-ignore: &docs-only
+      - README.md
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - CODE_OF_CONDUCT.md
+      - AGENTS.md
+      - CLAUDE.md
+      - docs/*.md
+      - docs/screenshots/**
+      - assets/README.md
+      - assets/overmark-demo.gif
+      - assets/preview.png
+      - .github/ISSUE_TEMPLATE/**
+      - .github/pull_request_template.md
   pull_request:
+    paths-ignore: *docs-only
   # Run by hand (Actions > CI > Run workflow).
   workflow_dispatch:
 
