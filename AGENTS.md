@@ -47,9 +47,11 @@ Push, tag or publish only with the owner's go-ahead, given at the time in your o
 **Merging into main:** each piece of work lands on main as **one squashed commit**
 (`git merge --squash <branch>`, then one commit), never a merge commit. Its message is for the
 public: a short summary line, then what changed for a user or contributor and why. No card or
-issue numbers (GitHub links `#n` to its issues), no people's names, no review rounds and no
-wording about the tools or agents that made it. Commit as the repository's usual identity (its
-no-reply address). The round-by-round commits stay on your branch; once merged, reset your branch
+issue numbers (GitHub links `#n` to its issues), no people's names, no review rounds, and no
+wording in the message text about the tools or agents that made it. That rule covers the text
+only: the `Co-Authored-By:` trailer at the end stays on every commit, as honest attribution in
+GitHub's standard form, so never strip it or rebuild commits to remove it before a push. Commit
+as the repository's usual identity (its no-reply address). The round-by-round commits stay on your branch; once merged, reset your branch
 to the new main so the next piece of work starts from it.
 
 **Code, comments and docs are public too:** they cite no card or issue numbers, no people's names
