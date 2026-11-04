@@ -2320,7 +2320,7 @@ dependencies = [
 
 [[package]]
 name = "overmark"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "eframe",
@@ -2339,7 +2339,7 @@ dependencies = [
 
 [[package]]
 name = "overmark-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "fluent-bundle",
  "kurbo",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "overmark-win"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "accesskit",
  "accesskit_windows",

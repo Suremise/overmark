@@ -496,6 +496,8 @@ const RELEASED: &[(&str, &str)] = &[
     ("0.1.0-changed", include_str!("released/0.1.0-changed.toml")),
     ("0.2.0-default", include_str!("released/0.2.0-default.toml")),
     ("0.2.0-changed", include_str!("released/0.2.0-changed.toml")),
+    ("0.2.1-default", include_str!("released/0.2.1-default.toml")),
+    ("0.2.1-changed", include_str!("released/0.2.1-changed.toml")),
 ];
 
 /// Every key `old` sets is in `new` with the same value. (`new` is the file as this version
@@ -573,8 +575,8 @@ fn every_released_versions_settings_load_and_keep_their_values() {
         let new: toml::Table = loaded.settings.to_documented_toml().parse().unwrap();
         assert_keeps("", &old, &new, name);
     }
-    // No released version had diagnostic logging: each file, changed ones too, reads it as off.
-    for (name, text) in RELEASED {
+    // 0.1.0 and 0.2.0 had no diagnostic logging: each file, changed ones too, reads it as off.
+    for (name, text) in &RELEASED[..4] {
         assert!(!text.contains("diagnostic_logging"), "{name}");
         assert!(!parse(text).settings.advanced.diagnostic_logging, "{name}");
     }

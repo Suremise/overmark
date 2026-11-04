@@ -6,6 +6,36 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-04
+
+Choosing a region works on every monitor, the toolbar keeps working after Alt+Tab, and a
+Diagnostic logging setting helps when reporting a problem.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the exe
+("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt` first
+(`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with it), and
+if it matches, choose **More info**, then **Run anyway**. Installing it over 0.2.0 keeps your
+settings.
+
+### Added
+
+- **Diagnostic logging** in Settings > About and advanced, off by default: it adds detail to
+  the log (the monitors the layer covers, which window has the keyboard, hotkey presses,
+  choosing a region, how a capture is saved) for reporting a problem. Windows are named by
+  their program, never their title, and the log never holds what you drew or typed. The user
+  guide says how to use it when you report a problem.
+- The user guide's troubleshooting covers the layer's keys doing nothing when it opens over a
+  full-screen remote desktop or virtual machine window (click the layer once), and the keys
+  going to another app after Alt+Tab.
+
+### Fixed
+
+- Choosing a region (Ctrl+Shift+S, or the Capture a region hotkey) works on any monitor, not
+  just the one the pointer was on, and nothing is drawn, erased or undone on another monitor
+  while you choose.
+- After Alt+Tab with the layer open, the toolbar keeps working: its clicks no longer go to the
+  drawing beneath it, and a click on it gives the keyboard back to the layer.
+
 ## [0.2.0] - 2026-11-01
 
 Right-click to undo, a hotkey to capture a region, and the tray icon's tooltip stays.
