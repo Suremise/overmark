@@ -338,10 +338,14 @@ when installed, or the `logs` folder beside a portable `overmark.exe`. **Open th
 Settings (About and advanced) takes you there. It holds at most three files of 1 MB
 (`overmark.log`, `overmark.1.log`, `overmark.2.log`) and never records what you drew or typed.
 
-By default the log keeps only **warnings and errors** (a hotkey another app has taken, a capture
-that couldn't be saved, a crash). **Diagnostic logging** (Settings, About and advanced) makes it
-record what Overmark did too, with times: opening and closing the layer, the tools you picked,
-each capture. It takes effect at once, and is off by default.
+The log is always kept. It records what Overmark did, with times: its version when it starts,
+opening and closing the layer, the tools you picked, each capture, and any warnings and errors
+(a hotkey another app has taken, a capture that couldn't be saved, a crash).
+
+**Diagnostic logging** (Settings, About and advanced) adds detail for reporting a problem: the
+monitors the layer covers, which window has the keyboard, the toolbar being brought back on top,
+each hotkey press, choosing a region, and how a capture is copied or saved. Windows are named by
+their program and kind, never by their title. It takes effect at once, and is off by default.
 
 To [report a problem](https://github.com/Suremise/overmark/issues), turn **Diagnostic logging**
 on, make the problem happen again, then attach the log. You can turn it off afterwards.

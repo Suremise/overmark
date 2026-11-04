@@ -34,7 +34,7 @@ use crate::win32::capture::{self, Frame};
 use crate::win32::clock;
 use crate::win32::dpi::{self, Monitor};
 use crate::win32::layered::LayeredSurface;
-use crate::win32::window::{self, Handler, Options, Window};
+use crate::win32::window::{self, Handler, Named, Options, Window};
 
 pub use crate::core::backdrop::Backdrop;
 
@@ -390,7 +390,7 @@ impl Drop for Overlay {
         // Before the layer's windows go, while this process is still in the foreground.
         if let Some(h) = self.previous_focus.take() {
             let given = window::give_focus_back(h);
-            tracing::debug!(given, "focus given back");
+            tracing::debug!(given, to = %Named(Some(h)), "the keyboard given back");
         }
     }
 }
@@ -808,9 +808,32 @@ impl Overlay {
         for s in &overlay.screens {
             s.ink.window.show(s.monitor.primary);
         }
-        if let Some(primary) = overlay.screens.iter().find(|s| s.monitor.primary) {
-            primary.ink.window.focus();
+        let took = overlay
+            .screens
+            .iter()
+            .find(|s| s.monitor.primary)
+            .map(|primary| primary.ink.window.focus());
+        // For diagnostic logging: the monitors covered, and where the keyboard went (keys
+        // reach the layer only while it's in the foreground).
+        for s in &overlay.screens {
+            let (m, r) = (&s.monitor, s.monitor.rect);
+            tracing::debug!(
+                monitor = %m.name,
+                left = r.left,
+                top = r.top,
+                width = r.width(),
+                height = r.height(),
+                dpi = m.dpi,
+                primary = m.primary,
+                "a layer on"
+            );
         }
+        tracing::debug!(
+            ?took,
+            foreground = %Named(window::foreground()),
+            before = %Named(overlay.previous_focus),
+            "the layer's keyboard"
+        );
         // Not waiting for the compositor here: the app shows the toolbar first, so both come
         // in the same frame, then waits once ([`Overlay::shown`]).
         timing.visible_ms = since(asked_100ns);
@@ -1358,7 +1381,14 @@ impl Overlay {
             .or(windows.first())
         {
             w.layer.window.show(true);
-            w.layer.window.focus();
+            let took = w.layer.window.focus();
+            tracing::debug!(
+                screen = w.screen,
+                monitor = %self.screens[w.screen].monitor.name,
+                took,
+                foreground = %Named(window::foreground()),
+                "the selection's keyboard"
+            );
         }
         let sizes = windows.iter().map(|w| w.size()).collect();
         self.selection = Some(Regions {
@@ -1389,8 +1419,18 @@ impl Overlay {
     /// toolbar. The ink layer then comes over the toolbar: [`OverlayEvent::Activated`] follows.
     pub fn take_keyboard(&self) {
         if let Some(primary) = self.screens.iter().find(|s| s.monitor.primary) {
-            primary.ink.window.focus();
+            let from = Named(window::foreground());
+            let took = primary.ink.window.focus();
+            tracing::debug!(took, %from, "the layer takes the keyboard back");
         }
+    }
+
+    /// Whether `hwnd` (the toolbar) is above every ink layer in the z-order: where it has to
+    /// be for its clicks to reach it.
+    pub fn is_above_ink(&self, hwnd: HWND) -> bool {
+        self.screens
+            .iter()
+            .all(|s| window::is_above(hwnd, s.ink.window.hwnd()))
     }
 
     /// Whether a region is being chosen.

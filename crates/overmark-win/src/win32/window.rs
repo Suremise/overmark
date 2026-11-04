@@ -460,6 +460,75 @@ pub fn foreground() -> Option<HWND> {
     (!h.is_invalid()).then_some(h)
 }
 
+/// Whether `hwnd` is a window of this process.
+pub fn is_ours(hwnd: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let mut pid = 0;
+    // SAFETY: a plain query into a local; a stale handle leaves `pid` at 0.
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    pid != 0 && pid == std::process::id()
+}
+
+/// A top-level window as the diagnostic log names it: whose it is ("ours", or the exe's file
+/// name), and its class ("ours Overmark.Layer", "mstsc.exe TscShellContainerClass"), or
+/// "none". Never its title, which can name a document or a remote machine.
+pub fn describe(hwnd: Option<HWND>) -> String {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowThreadProcessId};
+    let Some(hwnd) = hwnd else {
+        return "none".into();
+    };
+    let mut class = [0u16; 128];
+    // SAFETY: a plain query into a buffer we own; a stale handle gives 0 characters.
+    let n = unsafe { GetClassNameW(hwnd, &mut class) }.max(0) as usize;
+    let class = String::from_utf16_lossy(&class[..n]);
+    let owner = if is_ours(hwnd) {
+        "ours".to_string()
+    } else {
+        let mut pid = 0;
+        // SAFETY: as in `is_ours`; the process handle is closed below, and the name goes into
+        // a buffer we own, its length passed.
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                Ok(process) => {
+                    let mut path = [0u16; 512];
+                    let mut len = path.len() as u32;
+                    let named = QueryFullProcessImageNameW(
+                        process,
+                        PROCESS_NAME_WIN32,
+                        windows::core::PWSTR(path.as_mut_ptr()),
+                        &mut len,
+                    )
+                    .is_ok();
+                    let _ = CloseHandle(process);
+                    let path = String::from_utf16_lossy(&path[..len as usize]);
+                    match path.rsplit('\\').next() {
+                        Some(exe) if named && !exe.is_empty() => exe.to_string(),
+                        _ => format!("process {pid}"),
+                    }
+                }
+                Err(_) => format!("process {pid}"),
+            }
+        }
+    };
+    format!("{owner} {class}")
+}
+
+/// A window named as [`describe`] names it, only when it's written: a log line that isn't
+/// kept (diagnostic logging off) costs no queries.
+pub struct Named(pub Option<HWND>);
+
+impl std::fmt::Display for Named {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&describe(self.0))
+    }
+}
+
 /// Gives the focus back to `hwnd` (another app's window, from [`foreground`]), if it's still
 /// there. Windows allows it while this process is in the foreground, as it is when the layer
 /// closes.
@@ -522,5 +591,36 @@ mod tests {
             assert!(std::ptr::eq(title(key), title(key)), "made once");
         }
         assert_eq!(title("window-notice-name"), "Overmark notice");
+    }
+
+    /// The log names a window of ours as ours, with its class, and another process's by its exe
+    /// or process id, never as ours. The window is never shown: nothing takes the foreground.
+    #[test]
+    fn the_log_tells_our_windows_from_others() {
+        use super::{Options, Rect, Window, describe, is_ours};
+        let ours = Window::new(
+            Rect::new(40, 40, 120, 120),
+            Options {
+                no_activate: true,
+                title: Some("Overmark test window"),
+                ..Default::default()
+            },
+            Box::new(|_, _, _, _| None),
+        )
+        .expect("a window");
+        assert!(is_ours(ours.hwnd()));
+        let named = describe(Some(ours.hwnd()));
+        assert!(named.starts_with("ours "), "{named}");
+        assert!(named.len() > "ours ".len(), "with its class: {named}");
+        // The desktop window is the system's.
+        // SAFETY: a plain query.
+        let desktop = unsafe { windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow() };
+        assert!(!is_ours(desktop));
+        let named = describe(Some(desktop));
+        assert!(!named.starts_with("ours"), "{named}");
+        assert!(named.ends_with("#32769"), "its class: {named}");
+        assert_eq!(describe(None), "none");
+        assert_eq!(super::Named(Some(desktop)).to_string(), named);
+        assert_eq!(super::Named(None).to_string(), "none");
     }
 }

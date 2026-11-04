@@ -43,7 +43,7 @@ settings-print-screen-taken = { key-print-screen } is in use by Windows or anoth
 settings-check-updates = Check for updates
 settings-check-updates-help = Off by default. When on, Overmark only reads the latest release on GitHub; it never downloads or installs anything by itself.
 settings-diagnostic-logging = Diagnostic logging
-settings-diagnostic-logging-help = Off by default: the log keeps only warnings and errors. Turn it on before you report a problem, so the log records what Overmark did (never what you draw or type). It takes effect at once.
+settings-diagnostic-logging-help = Off by default. The log always records what Overmark did, never what you draw or type. Turn this on before you report a problem: the log then adds detail about the layer's windows, the keyboard, regions, hotkeys and captures. It takes effect at once.
 
 ## Drawing
 

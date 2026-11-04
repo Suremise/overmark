@@ -397,13 +397,27 @@ impl App {
         .into_iter()
         .filter_map(|(k, c)| c.then_some(k))
         .collect();
-        // First, so turning it on logs this read too.
+        // First, so turning it on adds this read's diagnostic detail too.
         if self.settings.advanced.diagnostic_logging != old.advanced.diagnostic_logging {
             overmark_win::logging::set_diagnostic(self.settings.advanced.diagnostic_logging);
         }
         tracing::info!(hotkeys_changed = ?changed, "settings read again");
+        let sections: Vec<&str> = [
+            ("general", a.general != b.general),
+            ("drawing", a.drawing != b.drawing),
+            ("capture", a.capture != b.capture),
+            ("advanced", a.advanced != b.advanced),
+            ("backdrops", a.backdrops != b.backdrops),
+            ("guides", a.guides != b.guides),
+            ("toolbar", a.toolbar != b.toolbar),
+        ]
+        .into_iter()
+        .filter_map(|(k, c)| c.then_some(k))
+        .collect();
+        tracing::debug!(?sections, "the sections changed");
         if !changed.is_empty() {
             // Let go of the old ones first, so a key moved between actions can be taken.
+            tracing::debug!(count = self.registered.len(), "the old hotkeys let go");
             self.hotkeys = None;
             self.registered.clear();
             self.ui.notify_keys = Some(changed);

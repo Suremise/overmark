@@ -662,13 +662,19 @@ only the resident instance writes):
 stderr. The file rolls at 1 MB to `overmark.1.log` and `overmark.2.log`, so at most three files
 of 1 MB; a record never straddles two files, and a new run appends. Only the resident instance
 logs to the file (a second launch, `--quit` and the grabber helper don't), so one process rolls
-it. Panics on any thread are logged (`log_panics`, Replica's). How much follows
-`advanced.diagnostic_logging`: off (the default), warnings and errors only; on, `info` too
-(`debug` never: development timings). The level sits behind a `tracing-subscriber` reload layer,
-so `logging::set_diagnostic` changes it live when the tray reads the settings again; the tray
-starts at warnings and sets it once the settings are loaded. A failure the user should know
-about logs as a warning, so it's kept with diagnostics off. With them on, the first line of each
-run says the version, the mode, the settings file, whether it can save and the log's path.
+it. Panics on any thread are logged (`log_panics`, Replica's). The normal log is `info` and up,
+always: the first line of each run says the version, the mode, the settings file, whether it can
+save, the log's path and whether diagnostic logging is on. `advanced.diagnostic_logging` (off by
+default) adds `debug` from Overmark's own crates only (`overmark`, `overmark_core`,
+`overmark_win`; never winit's or another crate's), through a `Targets` filter behind a
+`tracing-subscriber` reload layer, so `logging::set_diagnostic` changes it live when the tray
+reads the settings again. The `debug` lines are focused detail for a report, a line per event and
+none in per-frame, per-pointer or per-paint paths: each layer's monitor and where the keyboard
+went on opening, on choosing a region and on closing; a hotkey press with the foreground window;
+an activated ink layer and whether the toolbar is back on top of it; the toolbar taking the
+keyboard back; the settings sections changed on a reload and the hotkeys let go; a capture's
+delivery; and the opening timings. Windows are named by `window::Named` (the owner exe and the
+class, never the title), queried only when the line is written.
 
 **Tests:** `crates/overmark/tests/settings_places.rs`, each in temp folders of its own: the
 marker (settings made beside the exe, nothing in `%APPDATA%`); a `settings.toml` beside the exe

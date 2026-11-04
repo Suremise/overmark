@@ -362,8 +362,9 @@ pub struct AdvancedSettings {
     /// Whether Overmark looks for a newer release on GitHub. Off by default: no request unless
     /// the user asks for one.
     pub check_for_updates: bool,
-    /// Whether the log records what Overmark did (`info`), not only warnings and errors. Off
-    /// by default; turned on before reporting a problem. A file without it reads as off.
+    /// Whether the log adds diagnostic detail (Overmark's `debug` lines) to what it always
+    /// records. Off by default; turned on before reporting a problem. A file without it reads
+    /// as off.
     pub diagnostic_logging: bool,
 }
 
@@ -900,8 +901,8 @@ button only: a pen's barrel button and touch never undo.",
             &self.advanced.check_for_updates.to_string(),
         );
         w.key(
-            "Log what Overmark does, not only warnings and errors: turn it on before you report a
-problem. Never what you draw or type (default false).",
+            "Add diagnostic detail to the log (the layer's windows, the keyboard, regions, hotkeys,
+captures): turn it on before you report a problem. Never what you draw or type (default false).",
             "diagnostic_logging",
             &self.advanced.diagnostic_logging.to_string(),
         );

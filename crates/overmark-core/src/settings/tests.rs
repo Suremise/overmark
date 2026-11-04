@@ -85,7 +85,7 @@ fn the_defaults() {
     assert!(s.capture.include_drawing);
     // Off by default: no network.
     assert!(!s.advanced.check_for_updates);
-    // Off by default: the log keeps warnings and errors only.
+    // Off by default: the log adds no diagnostic detail.
     assert!(!s.advanced.diagnostic_logging);
     assert_eq!(
         s.capture.resolve_save_folder(Path::new("/home/p/Pictures")),

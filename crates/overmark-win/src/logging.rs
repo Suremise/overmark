@@ -3,10 +3,12 @@
 //! most three files of 1 MB each. Only the resident app writes it (one instance per session);
 //! the grabber helper doesn't log to file.
 //!
-//! How much is logged follows Settings' "Diagnostic logging" (`advanced.diagnostic_logging`):
-//! off, the default, keeps warnings and errors only (panics among them); on, it adds `info`,
-//! what Overmark did (never what was drawn or typed). [`set_diagnostic`] changes it while the
-//! app runs: the level sits behind a reload layer, so nothing restarts.
+//! The log always keeps `info` and above: what Overmark did, its warnings and errors (panics
+//! among them), never what was drawn or typed. Settings' "Diagnostic logging"
+//! (`advanced.diagnostic_logging`, off by default) adds Overmark's own `debug` lines: focused
+//! detail around the layer's windows, the keyboard, regions, hotkeys and captures, for
+//! reporting a problem. Other crates' `debug` never comes in. [`set_diagnostic`] changes it
+//! while the app runs: the filter sits behind a reload layer, so nothing restarts.
 //!
 //! `log_panics` and `panic_message` are Replica's (`replica-win/src/logging.rs`); the rolling
 //! writer is Overmark's, since Replica keeps one file per process instead.
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing_subscriber::Registry;
-use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload;
@@ -128,43 +130,47 @@ impl<'a> MakeWriter<'a> for Shared {
     }
 }
 
-/// The level logged: warnings and errors, or with `diagnostic` on, `info` too. Not `debug`:
-/// that's timings made for development, too many for a log kept for reports.
-pub fn level(diagnostic: bool) -> LevelFilter {
+/// Overmark's own crates: the targets whose `debug` lines diagnostic logging adds.
+const OURS: [&str; 3] = ["overmark", "overmark_core", "overmark_win"];
+
+/// What's logged: `info` and above from everything, and with `diagnostic` on, `debug` from
+/// Overmark's own crates too (not other crates', such as the windowing library's).
+pub fn filter(diagnostic: bool) -> Targets {
+    let all = Targets::new().with_default(LevelFilter::INFO);
     if diagnostic {
-        LevelFilter::INFO
+        all.with_targets(OURS.map(|t| (t, LevelFilter::DEBUG)))
     } else {
-        LevelFilter::WARN
+        all
     }
 }
 
-/// What changes the level of a subscriber made with [`level_layer`].
-type LevelHandle = reload::Handle<LevelFilter, Registry>;
+/// What changes the filter of a subscriber made with [`filter_layer`].
+type FilterHandle = reload::Handle<Targets, Registry>;
 
 /// The global subscriber's, once [`init`] has set it up.
-static LEVEL: OnceLock<LevelHandle> = OnceLock::new();
+static FILTER: OnceLock<FilterHandle> = OnceLock::new();
 
-/// A level filter that can be changed later through its handle, starting at
-/// [`level`]`(diagnostic)`.
-fn level_layer(diagnostic: bool) -> (reload::Layer<LevelFilter, Registry>, LevelHandle) {
-    reload::Layer::new(level(diagnostic))
+/// A filter that can be changed later through its handle, starting at
+/// [`filter`]`(diagnostic)`.
+fn filter_layer(diagnostic: bool) -> (reload::Layer<Targets, Registry>, FilterHandle) {
+    reload::Layer::new(filter(diagnostic))
 }
 
-fn apply(handle: &LevelHandle, diagnostic: bool) {
-    if let Err(error) = handle.reload(level(diagnostic)) {
+fn apply(handle: &FilterHandle, diagnostic: bool) {
+    if let Err(error) = handle.reload(filter(diagnostic)) {
         tracing::warn!(%error, "couldn't change how much is logged");
     }
 }
 
 /// Follows the "Diagnostic logging" setting from now on. Before [`init`], it does nothing.
 pub fn set_diagnostic(diagnostic: bool) {
-    if let Some(handle) = LEVEL.get() {
+    if let Some(handle) = FILTER.get() {
         apply(handle, diagnostic);
     }
 }
 
 /// Sets up the global `tracing` subscriber: to the rolling file in `dir` (none if `None`, a
-/// folder that can't be written to) and to stderr, at [`level`]`(diagnostic)` until
+/// folder that can't be written to) and to stderr, through [`filter`]`(diagnostic)` until
 /// [`set_diagnostic`] changes it. Returns the log file's path, if any. A file that can't be
 /// opened is reported, and the logs go to stderr only.
 pub fn init(dir: Option<&Path>, diagnostic: bool) -> Option<PathBuf> {
@@ -192,7 +198,7 @@ pub fn init(dir: Option<&Path>, diagnostic: bool) -> Option<PathBuf> {
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(io::stderr)
         .with_target(false);
-    let (filter, handle) = level_layer(diagnostic);
+    let (filter, handle) = filter_layer(diagnostic);
     if tracing_subscriber::registry()
         .with(filter)
         .with(file_layer)
@@ -200,7 +206,7 @@ pub fn init(dir: Option<&Path>, diagnostic: bool) -> Option<PathBuf> {
         .try_init()
         .is_ok()
     {
-        let _ = LEVEL.set(handle);
+        let _ = FILTER.set(handle);
     }
     path
 }
@@ -310,12 +316,13 @@ mod tests {
         }
     }
 
-    /// Off, only warnings and errors are logged; on, `info` too, and switching takes effect
-    /// at once, with no new subscriber. `debug` is never logged.
+    /// Off, `info` and above are logged, as always, and no `debug`; on, Overmark's own
+    /// `debug` lines come in too, never another crate's. Switching takes effect at once, with
+    /// no new subscriber.
     #[test]
-    fn the_level_follows_diagnostic_logging() {
+    fn diagnostic_logging_adds_our_debug_lines() {
         let buffer = Buffer::default();
-        let (filter, handle) = level_layer(false);
+        let (filter, handle) = filter_layer(false);
         let subscriber = tracing_subscriber::registry().with(filter).with(
             tracing_subscriber::fmt::layer()
                 .with_ansi(false)
@@ -324,38 +331,43 @@ mod tests {
         let logged = || String::from_utf8(std::mem::take(&mut *buffer.0.lock().unwrap())).unwrap();
         tracing::subscriber::with_default(subscriber, || {
             let all = || {
+                tracing::trace!("a trace line");
                 tracing::debug!("a debug line");
+                tracing::debug!(target: "winit::platform", "another crate's debug line");
+                tracing::info!(target: "winit::platform", "another crate's info line");
                 tracing::info!("an info line");
                 tracing::warn!("a warning line");
                 tracing::error!("an error line");
             };
+            let normal = |log: &str| {
+                for line in [
+                    "an info line",
+                    "another crate's info line",
+                    "a warning line",
+                    "an error line",
+                ] {
+                    assert!(log.contains(line), "{line}: {log}");
+                }
+                assert!(!log.contains("another crate's debug line"), "{log}");
+                assert!(!log.contains("a trace line"), "{log}");
+            };
             all();
             let off = logged();
-            assert!(!off.contains("an info line"), "{off}");
+            normal(&off);
             assert!(!off.contains("a debug line"), "{off}");
-            assert!(
-                off.contains("a warning line") && off.contains("an error line"),
-                "{off}"
-            );
 
             apply(&handle, true);
             all();
             let on = logged();
-            assert!(on.contains("an info line"), "{on}");
-            assert!(
-                on.contains("a warning line") && on.contains("an error line"),
-                "{on}"
-            );
-            assert!(!on.contains("a debug line"), "{on}");
+            normal(&on);
+            assert!(on.contains("a debug line"), "{on}");
 
             apply(&handle, false);
             all();
             let off = logged();
-            assert!(!off.contains("an info line"), "{off}");
-            assert!(off.contains("a warning line"), "{off}");
+            normal(&off);
+            assert!(!off.contains("a debug line"), "{off}");
         });
-        assert_eq!(level(false), LevelFilter::WARN);
-        assert_eq!(level(true), LevelFilter::INFO);
     }
 
     #[test]

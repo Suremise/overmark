@@ -18,7 +18,7 @@ use overmark_win::save;
 use overmark_win::win32::shell;
 use overmark_win::win32::toast::Toast;
 use overmark_win::win32::tray::{self, BalloonKind, Instance, SingleInstance, Tray, TrayEvent};
-use overmark_win::win32::{clock, dpi, language};
+use overmark_win::win32::{clock, dpi, language, window};
 
 use crate::APP_ID;
 use crate::config::Startup;
@@ -637,7 +637,17 @@ impl App {
             }
             // Activated, it came over the toolbar: the toolbar goes back on top, or its clicks
             // would go to the ink (after Alt+Tab, the first click on the layer does this).
-            OverlayEvent::Activated => self.raise_toolbar(),
+            OverlayEvent::Activated => {
+                self.raise_toolbar();
+                if tracing::enabled!(tracing::Level::DEBUG)
+                    && let (Some(tb), Some(overlay)) = (&self.toolbar, &self.overlay)
+                {
+                    tracing::debug!(
+                        toolbar_on_top = overlay.is_above_ink(tb.hwnd()),
+                        "an ink layer was activated: the toolbar raised over it"
+                    );
+                }
+            }
             OverlayEvent::RegionCancelled => {
                 self.pending_region = None;
                 tracing::info!("region cancelled");
@@ -841,6 +851,11 @@ impl App {
             .map(Hotkeys::take_pressed)
             .unwrap_or_default();
         for (action, at) in pressed {
+            tracing::debug!(
+                ?action,
+                foreground = %window::Named(window::foreground()),
+                "hotkey pressed"
+            );
             let backdrop = match action {
                 // Exactly as the tray's item: the screen frozen, then a region chosen on it.
                 Action::CaptureRegion => {
@@ -941,11 +956,12 @@ pub fn run(args: Args) -> i32 {
         .ok()
         .filter(|p| p.is_writable())
         .map(AppPaths::logs_dir);
-    // Warnings and errors only until the settings say whether diagnostic logging is on.
+    // The normal log until the settings say whether diagnostic logging adds to it.
     let log_file = logging::init(log_dir.as_deref(), false);
     logging::log_panics();
     let startup = Startup::load(paths);
-    logging::set_diagnostic(startup.settings.advanced.diagnostic_logging);
+    let diagnostic = startup.settings.advanced.diagnostic_logging;
+    logging::set_diagnostic(diagnostic);
     let about = startup.about();
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -954,6 +970,7 @@ pub fn run(args: Args) -> i32 {
         can_save = about.can_save,
         created = startup.created,
         log = ?log_file,
+        diagnostic,
         "starting"
     );
     for w in &startup.warnings {
@@ -1209,6 +1226,16 @@ impl App {
         let after = self.settings.capture.after_capture;
         let copies = command == Command::Copy || after.copies();
         let saves = command != Command::Copy && after.saves();
+        tracing::debug!(
+            ?command,
+            ?after,
+            copies,
+            saves,
+            format = ?self.settings.capture.format,
+            width = image.width,
+            height = image.height,
+            "delivering"
+        );
         let copied = copies.then(|| save::copy(image));
         let folder = self.captures_folder();
         let saved = saves.then(|| {
@@ -1227,7 +1254,7 @@ impl App {
             _ => None,
         };
         tracing::info!(copied = ?copied.as_ref().map(|r| r.is_ok()), file = ?file, folder = %folder.display(), "delivered");
-        // Failures are warnings, so the log keeps them with diagnostic logging off.
+        // Failures are warnings of their own, so they stand out in the log.
         if let Some(Err(error)) = &copied {
             tracing::warn!(%error, "couldn't copy the capture");
         }
