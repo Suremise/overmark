@@ -407,6 +407,39 @@ pub fn post_key(hwnd: HWND, vk: u16) {
     }
 }
 
+/// Puts `hwnd` (any process's) at the top of the top-most windows without activating it: what
+/// a window's activation does to the z-order, for checks to do to a layer without the
+/// foreground.
+pub fn to_top(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{SWP_NOMOVE, SWP_NOSIZE};
+    // SAFETY: a z-order change of plain numbers; a stale handle fails harmlessly.
+    let _ = unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    };
+}
+
+/// Whether window `a` is above window `b` in the z-order (`false` if neither is a window).
+pub fn is_above(a: HWND, b: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GW_HWNDNEXT, GetTopWindow, GetWindow};
+    // SAFETY: plain queries walking the z-order from the top.
+    let mut h = unsafe { GetTopWindow(None) }.ok();
+    while let Some(w) = h {
+        if w == a || w == b {
+            return w == a;
+        }
+        h = unsafe { GetWindow(w, GW_HWNDNEXT) }.ok();
+    }
+    false
+}
+
 /// Sends the mouse to `hwnd` until [`release_mouse`], so a drag that leaves it still reaches it.
 pub fn capture_mouse(hwnd: HWND) {
     // SAFETY: our own window.

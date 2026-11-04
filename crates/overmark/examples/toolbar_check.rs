@@ -20,7 +20,8 @@
 //!   arrows sent to the ink layer move the width's slider;
 //! - the toolbar takes the pointer where it's drawn (its window is the one under it), lets it
 //!   through elsewhere, a tooltip below it and a few pixels round its frame too, and
-//!   is still on top after a region;
+//!   is still on top after a region, and after its ink layer is activated (a click on the layer
+//!   once Alt+Tab gave another app the foreground brings the layer over the toolbar);
 //! - **a share** (Windows Graphics Capture, after a barrier) **sees the ink and not the
 //!   toolbar**, whose window is excluded from capture;
 //! - dragged by its grip, it stays where it was left when the layer opens again, and Settings
@@ -659,19 +660,22 @@ fn main() {
     let cancelled = app
         .wait_for("region cancelled", Duration::from_secs(3))
         .is_some();
-    let on_top = on_bar.is_some_and(|(x, y)| {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            if window::window_at(x, y) == bar.hwnd {
-                return true;
+    let on_top_within = |hwnd: HWND| {
+        on_bar.is_some_and(|(x, y)| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                if window::window_at(x, y) == hwnd {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                window::pump();
+                window::wait_for_message(20);
             }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            window::pump();
-            window::wait_for_message(20);
-        }
-    });
+        })
+    };
+    let on_top = on_top_within(bar.hwnd);
     r.add(
         "Save a region starts a selection; after it the toolbar is on top again",
         pressed && sel.is_some() && cancelled && on_top,
@@ -680,6 +684,24 @@ fn main() {
             sel.is_some()
         ),
     );
+
+    // After Alt+Tab, a click on the layer activates its ink layer, which brings it to the top
+    // of the top-most windows, over the toolbar. Done here in two steps: the ink layer goes to
+    // the top, then gets `WM_ACTIVATE` (whose own handling activates it, as the click would:
+    // this check has the foreground already). The toolbar must come back over it, or its
+    // clicks go to the ink.
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{WA_CLICKACTIVE, WM_ACTIVATE};
+        window::to_top(ink);
+        let covered = on_top_within(ink);
+        window::post(ink, WM_ACTIVATE, WA_CLICKACTIVE as usize, 0);
+        let back = on_top_within(bar.hwnd);
+        r.add(
+            "after Alt+Tab, the ink layer activated over the toolbar: the toolbar is on top again",
+            covered && back,
+            format!("the ink over the toolbar {covered}, the toolbar back on top {back}"),
+        );
+    }
 
     // A share sees the ink, not the toolbar.
     let (tx, ty) = on_bar.unwrap_or((0, 0));

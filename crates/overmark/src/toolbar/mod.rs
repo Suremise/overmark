@@ -197,6 +197,8 @@ pub struct Toolbar {
     pixels_per_point: f32,
     events: Vec<egui::Event>,
     pointer_down: bool,
+    /// Pressed since the last [`Toolbar::take_pressed`].
+    pressed: bool,
     /// Where the grip is, in client pixels (from the last frame).
     grip: Option<Rect>,
     /// Dragging the grip: where the pointer and the window were when it started.
@@ -256,6 +258,7 @@ impl Toolbar {
             pixels_per_point: scale,
             events: Vec::new(),
             pointer_down: false,
+            pressed: false,
             grip: None,
             drag: None,
             moved: false,
@@ -305,6 +308,11 @@ impl Toolbar {
         }
     }
 
+    /// Whether it was pressed (a control or the grip) since the last call.
+    pub fn take_pressed(&mut self) -> bool {
+        std::mem::take(&mut self.pressed)
+    }
+
     /// Brings it back over the ink layer (which comes forward when it takes the focus).
     pub fn raise(&self) {
         self.panel.show();
@@ -341,6 +349,7 @@ impl Toolbar {
         for e in events {
             match e {
                 PanelEvent::Pointer { x, y, screen, down } => {
+                    self.pressed |= down && !self.pointer_down && self.drag.is_none();
                     if let Some(((cx, cy), (wx, wy))) = self.drag {
                         // The grip is held: the toolbar follows the pointer.
                         if down {

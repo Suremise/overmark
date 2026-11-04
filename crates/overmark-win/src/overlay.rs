@@ -157,6 +157,11 @@ pub enum OverlayEvent {
     RegionChosen { screen: usize, rect: Rect },
     /// Choosing a region was cancelled (Esc): the overlay stays open.
     RegionCancelled,
+    /// An ink layer was activated: a click on it once another app had the foreground (after
+    /// Alt+Tab), or the focus given to it. Activation brings a window to the top of the
+    /// top-most windows, over the toolbar (which never activates), so the toolbar's clicks
+    /// would go to the ink until the app raises it again.
+    Activated,
 }
 
 /// How long an open took, in milliseconds from the moment it was asked for.
@@ -423,7 +428,10 @@ pub const WM_OVERMARK_RIGHT_CLICK: u32 = windows::Win32::UI::WindowsAndMessaging
 pub fn reaches_ink_while_choosing(e: &OverlayEvent) -> bool {
     match e {
         OverlayEvent::Pointer { phase, .. } => matches!(phase, Phase::Up | Phase::Leave),
-        OverlayEvent::RightClick { .. } | OverlayEvent::Wheel { .. } => false,
+        // The selection windows are over the toolbar until the region is chosen.
+        OverlayEvent::RightClick { .. } | OverlayEvent::Wheel { .. } | OverlayEvent::Activated => {
+            false
+        }
         _ => true,
     }
 }
@@ -492,8 +500,8 @@ pub fn utf16_char(high: &mut Option<u16>, unit: u16) -> [Option<char>; 2] {
 fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler {
     use crate::win32::pointer;
     use windows::Win32::UI::WindowsAndMessaging::{
-        WM_CHAR, WM_KEYUP, WM_MOUSEWHEEL, WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP,
-        WM_POINTERUPDATE, WM_POINTERWHEEL, WM_SYSKEYUP,
+        WA_INACTIVE, WM_ACTIVATE, WM_CHAR, WM_KEYUP, WM_MOUSEWHEEL, WM_POINTERDOWN,
+        WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE, WM_POINTERWHEEL, WM_SYSKEYUP,
     };
     // A character beyond U+FFFF comes as two WM_CHARs, its UTF-16 surrogates.
     let surrogate = std::cell::Cell::new(None::<u16>);
@@ -579,6 +587,12 @@ fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler
         WM_KEYUP | WM_SYSKEYUP => {
             events.borrow_mut().push(OverlayEvent::KeyUp(wp.0 as u32));
             Some(LRESULT(0))
+        }
+        // Activated (by a click, or the focus given to it): it's now over the toolbar.
+        // Windows still does the rest (the keyboard focus).
+        WM_ACTIVATE if wp.0 & 0xFFFF != WA_INACTIVE as usize => {
+            events.borrow_mut().push(OverlayEvent::Activated);
+            None
         }
         WM_OVERMARK_KEY => {
             let bit = |n: u32| lp.0 & (1 << n) != 0;
@@ -1354,6 +1368,31 @@ impl Overlay {
         Ok(())
     }
 
+    /// Whether the keyboard is the layer's: one of its windows is in the foreground. After
+    /// Alt+Tab it's the other app's, until the layer or the toolbar is clicked.
+    pub fn has_keyboard(&self) -> bool {
+        let Some(foreground) = window::foreground() else {
+            return false;
+        };
+        self.screens
+            .iter()
+            .any(|s| s.ink.window.hwnd() == foreground)
+            || self.selection.as_ref().is_some_and(|r| {
+                r.windows
+                    .iter()
+                    .any(|w| w.layer.window.hwnd() == foreground)
+            })
+    }
+
+    /// Gives the keyboard back to the layer (the primary monitor's ink layer), as on opening.
+    /// Windows allows it when this process had the last input, as after a click on the
+    /// toolbar. The ink layer then comes over the toolbar: [`OverlayEvent::Activated`] follows.
+    pub fn take_keyboard(&self) {
+        if let Some(primary) = self.screens.iter().find(|s| s.monitor.primary) {
+            primary.ink.window.focus();
+        }
+    }
+
     /// Whether a region is being chosen.
     pub fn is_choosing_region(&self) -> bool {
         self.selection.is_some()
@@ -1850,6 +1889,82 @@ mod tests {
         events.borrow_mut().clear();
         handler(none, WM_POINTERDOWN, WPARAM(0xBEEF), LPARAM(0));
         assert!(events.borrow().is_empty(), "{:?}", events.borrow());
+    }
+
+    /// An ink layer activated (a click on it after Alt+Tab, or the focus given to it) says
+    /// so, so the app can raise the toolbar over it again; Windows still handles the message
+    /// (the keyboard focus). Deactivated, nothing. While a region is chosen the selection is
+    /// over the toolbar, so nothing raises it then.
+    #[test]
+    fn an_ink_layer_says_when_it_is_activated() {
+        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WA_ACTIVE, WA_CLICKACTIVE, WA_INACTIVE, WM_ACTIVATE,
+        };
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let handler = ink_handler(events.clone(), 0);
+        let none = HWND::default();
+        for state in [WA_ACTIVE, WA_CLICKACTIVE] {
+            // The high word (minimised) doesn't matter.
+            let wp = WPARAM(state as usize | 0x1_0000);
+            assert!(handler(none, WM_ACTIVATE, wp, LPARAM(0)).is_none());
+            assert_eq!(
+                std::mem::take(&mut *events.borrow_mut()),
+                [OverlayEvent::Activated]
+            );
+        }
+        assert!(handler(none, WM_ACTIVATE, WPARAM(WA_INACTIVE as usize), LPARAM(0)).is_none());
+        assert!(events.borrow().is_empty(), "{:?}", events.borrow());
+        assert!(!reaches_ink_while_choosing(&OverlayEvent::Activated));
+    }
+
+    /// Alt+Tab, then a click on the layer: the ink layer is activated, which puts it at the
+    /// top of the top-most windows, over the toolbar's panel (which never activates). Showing
+    /// the panel again, the app's answer to [`OverlayEvent::Activated`], puts it back on top.
+    /// Real windows of ours, off every screen: the activation's z-order change is made without
+    /// activating anything, and no `WM_ACTIVATE` is sent to them, since Windows' own handling
+    /// of it would activate the window for real and take the foreground.
+    #[test]
+    fn the_toolbar_goes_back_over_an_activated_ink_layer() {
+        use crate::win32::panel::Panel;
+        crate::core::i18n::init("en");
+        let ink = Window::new(
+            Rect::new(-30_000, -30_000, -29_800, -29_800),
+            Options {
+                layered: true,
+                title: Some("Overmark test ink"),
+                ..Default::default()
+            },
+            ink_handler(Rc::new(RefCell::new(Vec::new())), 0),
+        )
+        .expect("an ink window");
+        let panel = Panel::new(
+            Rect::new(-30_000, -30_000, -29_900, -29_950),
+            "Overmark test",
+        )
+        .expect("a panel");
+        let foreground = window::foreground();
+        ink.show(false);
+        panel.show();
+        assert!(
+            window::is_above(panel.hwnd(), ink.hwnd()),
+            "the panel over the ink at first"
+        );
+        window::to_top(ink.hwnd());
+        assert!(
+            window::is_above(ink.hwnd(), panel.hwnd()),
+            "activated, the ink is over the panel"
+        );
+        panel.show();
+        assert!(
+            window::is_above(panel.hwnd(), ink.hwnd()),
+            "the panel back on top"
+        );
+        assert_eq!(
+            window::foreground(),
+            foreground,
+            "nothing took the foreground"
+        );
     }
 
     fn decode(units: &[u16]) -> String {

@@ -456,6 +456,15 @@ impl App {
                 return;
             };
             tb.take_input();
+            // Pressed while another app has the keyboard (after Alt+Tab): the layer takes it
+            // back, as a click on the layer does. Its ink layer then comes over the toolbar,
+            // which goes back on top when that's told (`OverlayEvent::Activated`).
+            if tb.take_pressed()
+                && let Some(overlay) = self.overlay.as_ref()
+                && !overlay.has_keyboard()
+            {
+                overlay.take_keyboard();
+            }
             if !tb.due(&state) {
                 break;
             }
@@ -626,6 +635,9 @@ impl App {
                 self.region_chosen(screen, rect);
                 self.raise_toolbar();
             }
+            // Activated, it came over the toolbar: the toolbar goes back on top, or its clicks
+            // would go to the ink (after Alt+Tab, the first click on the layer does this).
+            OverlayEvent::Activated => self.raise_toolbar(),
             OverlayEvent::RegionCancelled => {
                 self.pending_region = None;
                 tracing::info!("region cancelled");
@@ -661,8 +673,8 @@ impl App {
         }
     }
 
-    /// The ink layer came forward (it took the focus back after a region): the toolbar goes
-    /// over it again.
+    /// The ink layer came forward (activated: it took the focus, after a region or Alt+Tab):
+    /// the toolbar goes over it again.
     fn raise_toolbar(&self) {
         if let Some(tb) = &self.toolbar {
             tb.raise();

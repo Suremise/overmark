@@ -352,6 +352,12 @@ Opened over a full-screen remote desktop or virtual machine window, the layer ma
 keyboard: the keys you press (Ctrl+Shift+S, Esc, a tool's letter) still go to that window. Click
 the layer once (or leave the remote window before you open it) and its keys work.
 
+### After Alt+Tab, the keys go to the other app
+
+With the layer open, Alt+Tab switches to another app beneath it: the layer and the toolbar stay
+on top, but your keys go to that app. Click the layer or the toolbar and the keys come back to
+Overmark (the toolbar's buttons work either way).
+
 ### The layer opens on the wrong monitor, or captures the wrong one
 
 Captures and the toolbar follow the **pointer**: move it to the monitor you want before you

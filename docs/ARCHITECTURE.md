@@ -805,7 +805,9 @@ platform-free and tested), and the drawing while the layer is open (`overmark::i
   `%WINDIR%\Fonts` at run time (`overmark_win::fonts`, Text: the font), loaded on the turn after
   the first opening, once the layer shows, so they never slow an opening.
 - **The focus:** the layer takes it when it opens (the primary monitor's ink layer), and gives
-  it back on close to the window that had it (`window::foreground`, `give_focus_back`).
+  it back on close to the window that had it (`window::foreground`, `give_focus_back`). Alt+Tab
+  gives it to another app beneath the layer, which stays open; a click on the layer or the
+  toolbar takes it back (see The toolbar, the window).
 
 **One session per monitor.** Each monitor's layer has its own core `Session` (its pixels from
 its own top-left); the tool, colour and widths are the same on all. Core keeps each session's
@@ -902,8 +904,15 @@ widgets (The windows' look), run on the app's own loop:
    Tested: a translucent quad blended once everywhere, scaling, clipping, texture patches.
 3. The window (`Panel`): layered (per-pixel alpha), **`WDA_EXCLUDEFROMCAPTURE`**, never
    activated (`WS_EX_NOACTIVATE`, `MA_NOACTIVATE`: the keys stay with the ink layer), above the
-   ink layer (made after it; brought back on top after a region selection, when the ink layer
-   takes the focus back). Its transparent pixels let the pointer through to the ink layer; its
+   ink layer (made after it; brought back on top whenever an ink layer is **activated**).
+   Activation puts a window at the top of the top-most windows, and the panel never activates,
+   so an ink layer that takes the focus (after a region selection), or is clicked once another
+   app has the foreground (Alt+Tab with the layer open), comes over it, and the toolbar's clicks
+   would go to the ink. The ink layer says so (`WM_ACTIVATE` gives `OverlayEvent::Activated`;
+   not while a region is chosen, when the selection covers the toolbar) and the app raises the
+   panel. A press on the toolbar while another app has the keyboard gives it back to the layer
+   (`Overlay::has_keyboard`, `take_keyboard`): Windows allows it, the click being this process's
+   input. Its transparent pixels let the pointer through to the ink layer; its
    own pixels take it, so a click on the toolbar never draws. **Only what's solid takes it:**
    each frame gives the panel its frames' rectangles (the toolbar's, a strip's, the
    More menu's: egui's visible areas but its tooltips, each a pixel larger for its border), and
