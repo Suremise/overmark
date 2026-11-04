@@ -362,6 +362,9 @@ pub struct AdvancedSettings {
     /// Whether Overmark looks for a newer release on GitHub. Off by default: no request unless
     /// the user asks for one.
     pub check_for_updates: bool,
+    /// Whether the log records what Overmark did (`info`), not only warnings and errors. Off
+    /// by default; turned on before reporting a problem. A file without it reads as off.
+    pub diagnostic_logging: bool,
 }
 
 /// The solid backdrops: their colours and optional hotkeys.
@@ -895,6 +898,12 @@ button only: a pen's barrel button and touch never undo.",
             "Look for a newer version on GitHub. Overmark only reads the latest release and never\ndownloads or installs anything by itself (default false: no network at all).",
             "check_for_updates",
             &self.advanced.check_for_updates.to_string(),
+        );
+        w.key(
+            "Log what Overmark does, not only warnings and errors: turn it on before you report a
+problem. Never what you draw or type (default false).",
+            "diagnostic_logging",
+            &self.advanced.diagnostic_logging.to_string(),
         );
 
         let b = &self.backdrops;

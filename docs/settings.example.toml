@@ -85,6 +85,9 @@ toast = true
 # Look for a newer version on GitHub. Overmark only reads the latest release and never
 # downloads or installs anything by itself (default false: no network at all).
 check_for_updates = false
+# Log what Overmark does, not only warnings and errors: turn it on before you report a
+# problem. Never what you draw or type (default false).
+diagnostic_logging = false
 
 # What's under the ink: W cycles Live, Frozen, the whiteboard and the blackboard.
 [backdrops]

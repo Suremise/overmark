@@ -397,6 +397,10 @@ impl App {
         .into_iter()
         .filter_map(|(k, c)| c.then_some(k))
         .collect();
+        // First, so turning it on logs this read too.
+        if self.settings.advanced.diagnostic_logging != old.advanced.diagnostic_logging {
+            overmark_win::logging::set_diagnostic(self.settings.advanced.diagnostic_logging);
+        }
         tracing::info!(hotkeys_changed = ?changed, "settings read again");
         if !changed.is_empty() {
             // Let go of the old ones first, so a key moved between actions can be taken.

@@ -451,6 +451,11 @@ fn about_shows_and_resets() {
     h.run();
     assert!(s.saved().advanced.check_for_updates);
 
+    assert!(!s.saved().advanced.diagnostic_logging);
+    h.get_by_label(&tr("settings-diagnostic-logging")).click();
+    h.run();
+    assert!(s.saved().advanced.diagnostic_logging);
+
     s.fake.0.borrow_mut().autostart = true;
     h.get_by_role_and_label(Role::Button, &tr("settings-reset"))
         .click();

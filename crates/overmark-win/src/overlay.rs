@@ -492,8 +492,8 @@ pub fn utf16_char(high: &mut Option<u16>, unit: u16) -> [Option<char>; 2] {
 fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler {
     use crate::win32::pointer;
     use windows::Win32::UI::WindowsAndMessaging::{
-        WM_ACTIVATEAPP, WM_CHAR, WM_KEYUP, WM_MOUSEWHEEL, WM_POINTERDOWN, WM_POINTERLEAVE,
-        WM_POINTERUP, WM_POINTERUPDATE, WM_POINTERWHEEL, WM_SYSKEYUP,
+        WM_CHAR, WM_KEYUP, WM_MOUSEWHEEL, WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP,
+        WM_POINTERUPDATE, WM_POINTERWHEEL, WM_SYSKEYUP,
     };
     // A character beyond U+FFFF comes as two WM_CHARs, its UTF-16 surrogates.
     let surrogate = std::cell::Cell::new(None::<u16>);
@@ -579,13 +579,6 @@ fn ink_handler(events: Rc<RefCell<Vec<OverlayEvent>>>, screen: usize) -> Handler
         WM_KEYUP | WM_SYSKEYUP => {
             events.borrow_mut().push(OverlayEvent::KeyUp(wp.0 as u32));
             Some(LRESULT(0))
-        }
-        // The keyboard leaving the app or coming back while the layer is open, for the log:
-        // keys reach the layer only while it's in the foreground, and it can lose that after
-        // it opens. Every top-level window of ours gets this, so only the first screen's logs.
-        WM_ACTIVATEAPP if screen == 0 => {
-            log_activation(wp.0 != 0, lp.0 as u32);
-            None
         }
         WM_OVERMARK_KEY => {
             let bit = |n: u32| lp.0 & (1 << n) != 0;
@@ -690,37 +683,6 @@ fn solid_frame(rect: Rect, c: crate::core::colour::Colour) -> Frame {
         width: rect.width(),
         height: rect.height(),
         bgra: [c.b, c.g, c.r, 255].repeat(pixels),
-    }
-}
-
-/// Logs whether the layer has the keyboard as it opens (`took`: what `SetForegroundWindow`
-/// said; then the window really in the foreground, and the one it was taken from). Keys reach the layer only while one of our windows is in the foreground:
-/// when Windows refuses (its foreground lock), they go on to the app that had it, often a
-/// full-screen one such as a remote-desktop client, until the user clicks the layer.
-fn log_focus(took: bool, previous: Option<HWND>) {
-    let now = window::foreground();
-    let ours = now.is_some_and(window::is_ours);
-    let (foreground, before) = (window::describe(now), window::describe(previous));
-    if ours {
-        tracing::info!(took, foreground, before, "the layer has the keyboard");
-    } else {
-        tracing::warn!(
-            took,
-            foreground,
-            before,
-            "the layer didn't get the keyboard: keys go to the foreground window until the layer is clicked"
-        );
-    }
-}
-
-/// Logs the keyboard coming to this app (`active`) or leaving it while the layer is open, with
-/// the window it went to (`thread` is the other app's thread, as `WM_ACTIVATEAPP` gives it).
-fn log_activation(active: bool, thread: u32) {
-    let foreground = window::describe(window::foreground());
-    if active {
-        tracing::info!(foreground, "the keyboard came to the layer");
-    } else {
-        tracing::info!(foreground, thread, "the keyboard left the layer");
     }
 }
 
@@ -833,8 +795,7 @@ impl Overlay {
             s.ink.window.show(s.monitor.primary);
         }
         if let Some(primary) = overlay.screens.iter().find(|s| s.monitor.primary) {
-            let took = primary.ink.window.focus();
-            log_focus(took, overlay.previous_focus);
+            primary.ink.window.focus();
         }
         // Not waiting for the compositor here: the app shows the toolbar first, so both come
         // in the same frame, then waits once ([`Overlay::shown`]).

@@ -46,6 +46,7 @@ fn changed() -> Settings {
     s.capture.include_drawing = false;
     s.capture.toast = false;
     s.advanced.check_for_updates = true;
+    s.advanced.diagnostic_logging = true;
     s.backdrops.whiteboard_colour = Colour::rgb(250, 248, 240);
     s.backdrops.blackboard_colour = Colour::rgb(10, 40, 30);
     s.backdrops.hotkey_whiteboard = "Win+Shift+W".into();
@@ -84,6 +85,8 @@ fn the_defaults() {
     assert!(s.capture.include_drawing);
     // Off by default: no network.
     assert!(!s.advanced.check_for_updates);
+    // Off by default: the log keeps warnings and errors only.
+    assert!(!s.advanced.diagnostic_logging);
     assert_eq!(
         s.capture.resolve_save_folder(Path::new("/home/p/Pictures")),
         Path::new("/home/p/Pictures").join("Overmark")
@@ -569,6 +572,11 @@ fn every_released_versions_settings_load_and_keep_their_values() {
         let old: toml::Table = text.parse().unwrap();
         let new: toml::Table = loaded.settings.to_documented_toml().parse().unwrap();
         assert_keeps("", &old, &new, name);
+    }
+    // No released version had diagnostic logging: each file, changed ones too, reads it as off.
+    for (name, text) in RELEASED {
+        assert!(!text.contains("diagnostic_logging"), "{name}");
+        assert!(!parse(text).settings.advanced.diagnostic_logging, "{name}");
     }
     // 0.1.0 had no right-click undo or Capture a region hotkey: either file takes the defaults.
     for (name, text) in &RELEASED[..2] {

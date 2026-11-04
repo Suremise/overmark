@@ -888,7 +888,7 @@ pub fn run(args: Args) -> i32 {
     overmark_core::i18n::init(&language::ui_language());
     if let Some(page) = args.settings {
         // Settings logs to stderr only: the file is the tray's (one writer rolls it).
-        logging::init(None);
+        logging::init(None, false);
         logging::log_panics();
         return crate::settings_window::run(page);
     }
@@ -929,9 +929,11 @@ pub fn run(args: Args) -> i32 {
         .ok()
         .filter(|p| p.is_writable())
         .map(AppPaths::logs_dir);
-    let log_file = logging::init(log_dir.as_deref());
+    // Warnings and errors only until the settings say whether diagnostic logging is on.
+    let log_file = logging::init(log_dir.as_deref(), false);
     logging::log_panics();
     let startup = Startup::load(paths);
+    logging::set_diagnostic(startup.settings.advanced.diagnostic_logging);
     let about = startup.about();
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -1213,6 +1215,13 @@ impl App {
             _ => None,
         };
         tracing::info!(copied = ?copied.as_ref().map(|r| r.is_ok()), file = ?file, folder = %folder.display(), "delivered");
+        // Failures are warnings, so the log keeps them with diagnostic logging off.
+        if let Some(Err(error)) = &copied {
+            tracing::warn!(%error, "couldn't copy the capture");
+        }
+        if let Some(Err(error)) = &saved {
+            tracing::warn!(reason = %error.reason, folder = %folder.display(), "couldn't save the capture");
+        }
         let folder_text = folder.display().to_string();
         let title = match (&copied, &saved) {
             (Some(Ok(())), Some(Ok(p))) => {

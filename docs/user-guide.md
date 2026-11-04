@@ -244,8 +244,8 @@ apply even while the layer is open.
 - **About and advanced:** the version and licence, the author and the link to Overmark's
   repository; whether this copy is portable or installed and
   where its settings file is, with buttons to open the settings and log folders; the links;
-  **Check for updates**; the **third-party notices** (the open-source parts Overmark is built
-  from, and their licences); and **Reset settings**, which puts every setting back to its
+  **Check for updates**; **Diagnostic logging** (see [the logs](#the-logs)); the **third-party
+  notices** (the open-source parts Overmark is built from, and their licences); and **Reset settings**, which puts every setting back to its
   default and turns Start with Windows off.
 
 Settings lives in a readable file, `settings.toml`, with each setting explained in it (see
@@ -336,18 +336,21 @@ fix it, or delete it to start again.
 Overmark keeps a small log, `logs\overmark.log`, beside its settings: `%APPDATA%\Overmark\logs`
 when installed, or the `logs` folder beside a portable `overmark.exe`. **Open the log folder** in
 Settings (About and advanced) takes you there. It holds at most three files of 1 MB
-(`overmark.log`, `overmark.1.log`, `overmark.2.log`) and records what Overmark did, with times,
-never what you drew or typed. Attach it when you
-[report a problem](https://github.com/Suremise/overmark/issues).
+(`overmark.log`, `overmark.1.log`, `overmark.2.log`) and never records what you drew or typed.
+
+By default the log keeps only **warnings and errors** (a hotkey another app has taken, a capture
+that couldn't be saved, a crash). **Diagnostic logging** (Settings, About and advanced) makes it
+record what Overmark did too, with times: opening and closing the layer, the tools you picked,
+each capture. It takes effect at once, and is off by default.
+
+To [report a problem](https://github.com/Suremise/overmark/issues), turn **Diagnostic logging**
+on, make the problem happen again, then attach the log. You can turn it off afterwards.
 
 ### The layer's keys do nothing until you click it
 
 Opened over a full-screen remote desktop or virtual machine window, the layer may not get the
 keyboard: the keys you press (Ctrl+Shift+S, Esc, a tool's letter) still go to that window. Click
-the layer once (or leave the remote window before you open it) and its keys work. Overmark logs
-whether the layer got the keyboard when it opens, and whenever the keyboard leaves it or comes
-back ([the logs](#the-logs)). Please [report it](https://github.com/Suremise/overmark/issues)
-with the log attached, whatever the log says: the cause isn't known yet.
+the layer once (or leave the remote window before you open it) and its keys work.
 
 ### The layer opens on the wrong monitor, or captures the wrong one
 

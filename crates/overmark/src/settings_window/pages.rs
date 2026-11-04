@@ -1090,6 +1090,12 @@ fn about(app: &mut SettingsApp, ui: &mut Ui) {
             Some(&flow(&tr("settings-check-updates-help"))),
             |ui| toggle(ui, &mut app.settings.advanced.check_for_updates),
         );
+        setting_row(
+            ui,
+            &tr("settings-diagnostic-logging"),
+            Some(&flow(&tr("settings-diagnostic-logging-help"))),
+            |ui| toggle(ui, &mut app.settings.advanced.diagnostic_logging),
+        );
     });
     ui.add_space(space::M);
     section_card(

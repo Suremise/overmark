@@ -3,17 +3,24 @@
 //! most three files of 1 MB each. Only the resident app writes it (one instance per session);
 //! the grabber helper doesn't log to file.
 //!
+//! How much is logged follows Settings' "Diagnostic logging" (`advanced.diagnostic_logging`):
+//! off, the default, keeps warnings and errors only (panics among them); on, it adds `info`,
+//! what Overmark did (never what was drawn or typed). [`set_diagnostic`] changes it while the
+//! app runs: the level sits behind a reload layer, so nothing restarts.
+//!
 //! `log_panics` and `panic_message` are Replica's (`replica-win/src/logging.rs`); the rolling
 //! writer is Overmark's, since Replica keeps one file per process instead.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use tracing_subscriber::Registry;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 
 /// The log's base name: `overmark.log`, then `overmark.1.log` and so on.
@@ -121,10 +128,46 @@ impl<'a> MakeWriter<'a> for Shared {
     }
 }
 
+/// The level logged: warnings and errors, or with `diagnostic` on, `info` too. Not `debug`:
+/// that's timings made for development, too many for a log kept for reports.
+pub fn level(diagnostic: bool) -> LevelFilter {
+    if diagnostic {
+        LevelFilter::INFO
+    } else {
+        LevelFilter::WARN
+    }
+}
+
+/// What changes the level of a subscriber made with [`level_layer`].
+type LevelHandle = reload::Handle<LevelFilter, Registry>;
+
+/// The global subscriber's, once [`init`] has set it up.
+static LEVEL: OnceLock<LevelHandle> = OnceLock::new();
+
+/// A level filter that can be changed later through its handle, starting at
+/// [`level`]`(diagnostic)`.
+fn level_layer(diagnostic: bool) -> (reload::Layer<LevelFilter, Registry>, LevelHandle) {
+    reload::Layer::new(level(diagnostic))
+}
+
+fn apply(handle: &LevelHandle, diagnostic: bool) {
+    if let Err(error) = handle.reload(level(diagnostic)) {
+        tracing::warn!(%error, "couldn't change how much is logged");
+    }
+}
+
+/// Follows the "Diagnostic logging" setting from now on. Before [`init`], it does nothing.
+pub fn set_diagnostic(diagnostic: bool) {
+    if let Some(handle) = LEVEL.get() {
+        apply(handle, diagnostic);
+    }
+}
+
 /// Sets up the global `tracing` subscriber: to the rolling file in `dir` (none if `None`, a
-/// folder that can't be written to) and to stderr. Returns the log file's path, if any. A file
-/// that can't be opened is reported, and the logs go to stderr only.
-pub fn init(dir: Option<&Path>) -> Option<PathBuf> {
+/// folder that can't be written to) and to stderr, at [`level`]`(diagnostic)` until
+/// [`set_diagnostic`] changes it. Returns the log file's path, if any. A file that can't be
+/// opened is reported, and the logs go to stderr only.
+pub fn init(dir: Option<&Path>, diagnostic: bool) -> Option<PathBuf> {
     let file = dir.and_then(|d| match RollingFile::open(d, LOG_NAME, MAX_BYTES, KEEP) {
         Ok(f) => Some(f),
         Err(error) => {
@@ -149,11 +192,16 @@ pub fn init(dir: Option<&Path>) -> Option<PathBuf> {
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(io::stderr)
         .with_target(false);
-    let _ = tracing_subscriber::registry()
-        .with(LevelFilter::INFO)
+    let (filter, handle) = level_layer(diagnostic);
+    if tracing_subscriber::registry()
+        .with(filter)
         .with(file_layer)
         .with(stderr_layer)
-        .try_init();
+        .try_init()
+        .is_ok()
+    {
+        let _ = LEVEL.set(handle);
+    }
     path
 }
 
@@ -239,6 +287,75 @@ mod tests {
         log.write_all(&[b'y'; 25]).unwrap();
         assert_eq!(fs::read(log.path(0)).unwrap(), vec![b'y'; 25]);
         assert_eq!(fs::read(log.path(1)).unwrap(), vec![b'x'; 25]);
+    }
+
+    /// A writer into a buffer the test reads.
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Buffer {
+        type Writer = Buffer;
+        fn make_writer(&'a self) -> Buffer {
+            self.clone()
+        }
+    }
+
+    /// Off, only warnings and errors are logged; on, `info` too, and switching takes effect
+    /// at once, with no new subscriber. `debug` is never logged.
+    #[test]
+    fn the_level_follows_diagnostic_logging() {
+        let buffer = Buffer::default();
+        let (filter, handle) = level_layer(false);
+        let subscriber = tracing_subscriber::registry().with(filter).with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(buffer.clone()),
+        );
+        let logged = || String::from_utf8(std::mem::take(&mut *buffer.0.lock().unwrap())).unwrap();
+        tracing::subscriber::with_default(subscriber, || {
+            let all = || {
+                tracing::debug!("a debug line");
+                tracing::info!("an info line");
+                tracing::warn!("a warning line");
+                tracing::error!("an error line");
+            };
+            all();
+            let off = logged();
+            assert!(!off.contains("an info line"), "{off}");
+            assert!(!off.contains("a debug line"), "{off}");
+            assert!(
+                off.contains("a warning line") && off.contains("an error line"),
+                "{off}"
+            );
+
+            apply(&handle, true);
+            all();
+            let on = logged();
+            assert!(on.contains("an info line"), "{on}");
+            assert!(
+                on.contains("a warning line") && on.contains("an error line"),
+                "{on}"
+            );
+            assert!(!on.contains("a debug line"), "{on}");
+
+            apply(&handle, false);
+            all();
+            let off = logged();
+            assert!(!off.contains("an info line"), "{off}");
+            assert!(off.contains("a warning line"), "{off}");
+        });
+        assert_eq!(level(false), LevelFilter::WARN);
+        assert_eq!(level(true), LevelFilter::INFO);
     }
 
     #[test]
