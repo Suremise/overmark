@@ -622,9 +622,10 @@ impl Ink {
         self.contact = None;
     }
 
-    /// Ends a contact still down (a key changes the tool, the backdrop or the drawing): as if
-    /// it lifted where it last was; the rest of it draws nothing.
-    fn end_contact(&mut self) {
+    /// Ends a contact still down (a key changes the tool, the backdrop or the drawing, or a
+    /// region is to be chosen): as if it lifted where it last was; the rest of it draws
+    /// nothing, and its lift only lets go of it.
+    pub fn end_contact(&mut self) {
         let Some(c) = self.contact else {
             return;
         };
@@ -1179,6 +1180,95 @@ mod tests {
 
     fn right_click(ink: &mut Ink, settings: &DrawingSettings) {
         ink.handle(OverlayEvent::RightClick { screen: 0 }, settings);
+    }
+
+    /// While a region is chosen, the app passes the layers' events on only as
+    /// [`overmark_win::overlay::reaches_ink_while_choosing`] says: a drag, a right-click or the
+    /// wheel on any monitor's layer then leaves the drawing as it was (the tester's drag on the
+    /// monitor without the selection drew a stroke).
+    #[test]
+    fn nothing_draws_or_undoes_while_a_region_is_chosen() {
+        use overmark_win::overlay::reaches_ink_while_choosing;
+        let s = DrawingSettings::default();
+        let mut ink = ink(2);
+        drag(&mut ink, 0, 100, false);
+        let before = counts(&ink);
+        let x0 = 2000 + 100;
+        let events = [
+            (Phase::Down, x0, true),
+            (Phase::Move, x0 + 50, true),
+            (Phase::Move, x0 + 80, true),
+            (Phase::Up, x0 + 100, false),
+        ]
+        .map(|(phase, x, contact)| OverlayEvent::Pointer {
+            screen: 1,
+            phase,
+            sample: sample(x, 300, contact, false),
+            shift: false,
+        })
+        .into_iter()
+        .chain([
+            OverlayEvent::RightClick { screen: 0 },
+            OverlayEvent::Wheel {
+                screen: 1,
+                delta: 120,
+            },
+        ]);
+        for e in events.filter(reaches_ink_while_choosing) {
+            ink.handle(e, &s);
+        }
+        assert_eq!(counts(&ink), before, "the drag on monitor B, then undo");
+        assert!(ink.contact.is_none(), "no stroke left open");
+        // The same drag once the region is chosen draws as usual.
+        drag(&mut ink, 1, 300, false);
+        assert_eq!(counts(&ink), vec![1, 1]);
+    }
+
+    /// Ctrl+Shift+S pressed mid-stroke: the stroke ends where it was as the selection begins
+    /// (the app ends the contact), and the moves and the lift during the selection add nothing
+    /// to it. The lift lets go of the contact, so the next press draws as usual.
+    #[test]
+    fn a_stroke_down_as_a_region_begins_ends_where_it_was() {
+        use overmark_win::overlay::reaches_ink_while_choosing;
+        let s = DrawingSettings::default();
+        let mut ink = ink(1);
+        for (phase, x) in [(Phase::Down, 100), (Phase::Move, 150)] {
+            let e = OverlayEvent::Pointer {
+                screen: 0,
+                phase,
+                sample: sample(x, 300, true, false),
+                shift: false,
+            };
+            ink.handle(e, &s);
+        }
+        ink.end_contact();
+        let xs = |ink: &Ink| -> Vec<f64> {
+            ink.sessions[0]
+                .drawing()
+                .items()
+                .next()
+                .map(|i| i.points.iter().map(|p| p.x).collect())
+                .unwrap_or_default()
+        };
+        let ended = xs(&ink);
+        assert_eq!(ended.last(), Some(&150.0), "{ended:?}");
+        let during =
+            [(Phase::Move, 600, true), (Phase::Up, 900, false)].map(|(phase, x, contact)| {
+                OverlayEvent::Pointer {
+                    screen: 0,
+                    phase,
+                    sample: sample(x, 300, contact, false),
+                    shift: false,
+                }
+            });
+        for e in during.into_iter().filter(reaches_ink_while_choosing) {
+            ink.handle(e, &s);
+        }
+        assert_eq!(xs(&ink), ended, "nothing added during the selection");
+        assert!(ink.contact.is_none(), "the lift let go of it");
+        assert_eq!(counts(&ink), vec![1]);
+        drag(&mut ink, 0, 500, false);
+        assert_eq!(counts(&ink), vec![2], "the next press draws");
     }
 
     #[test]

@@ -367,9 +367,10 @@ pub struct Overlay {
     backdrop: Backdrop,
     dim: f32,
     events: Rc<RefCell<Vec<OverlayEvent>>>,
-    /// Choosing a region, and what its window got.
-    selection: Option<Selection>,
-    selection_events: Rc<RefCell<Vec<SelectionInput>>>,
+    /// Choosing a region: a selection window on every monitor, and what each got (its
+    /// monitor's index with it).
+    selection: Option<Regions>,
+    selection_events: Rc<RefCell<Vec<(usize, SelectionInput)>>>,
     /// The exe that serves clean grabs (`--grabber`), and the helper while it runs.
     grabber_exe: Option<std::path::PathBuf>,
     grabber: Option<Grabber>,
@@ -412,6 +413,20 @@ pub const WM_OVERMARK_KEY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP
 /// Posted to an ink layer: the mouse's right button went down, as [`OverlayEvent::RightClick`]
 /// (no parameters). Windows can't make a real one without global input.
 pub const WM_OVERMARK_RIGHT_CLICK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x43;
+
+/// Whether layer event `e` still goes to the drawing while a region is chosen. The selection
+/// covers every monitor, but whatever reaches an ink layer meanwhile (a window over ours, a
+/// monitor added, a race as the selection opens) never draws, erases, undoes or changes the
+/// tool: no pointer sample but a lift, no right-click, no wheel. Keys and the rest go on as
+/// usual. A lift only lets go of a contact: one still down as the selection began was ended
+/// where it was then (the app's drawing ends it), so the lift adds nothing to it.
+pub fn reaches_ink_while_choosing(e: &OverlayEvent) -> bool {
+    match e {
+        OverlayEvent::Pointer { phase, .. } => matches!(phase, Phase::Up | Phase::Leave),
+        OverlayEvent::RightClick { .. } | OverlayEvent::Wheel { .. } => false,
+        _ => true,
+    }
+}
 
 fn phase_bits(p: Phase) -> usize {
     match p {
@@ -1104,32 +1119,25 @@ impl Overlay {
     /// The keys and other events since the last call. Runs the region selection on the way:
     /// its drag is followed here, and only its outcome comes out.
     pub fn take_events(&mut self) -> Vec<OverlayEvent> {
-        let mut out = std::mem::take(&mut *self.events.borrow_mut());
+        let events = std::mem::take(&mut *self.events.borrow_mut());
         let inputs = std::mem::take(&mut *self.selection_events.borrow_mut());
-        for i in inputs {
-            let Some(sel) = self.selection.as_mut() else {
-                break;
-            };
-            match sel.input(i) {
-                None => {}
-                Some(chosen) => {
-                    let screen = self
-                        .screens
-                        .iter()
-                        .position(|s| (s.monitor.rect.left, s.monitor.rect.top) == sel.origin)
-                        .unwrap_or(0);
-                    self.selection = None;
-                    out.push(match chosen {
-                        Some(rect) => OverlayEvent::RegionChosen { screen, rect },
-                        None => OverlayEvent::RegionCancelled,
-                    });
-                    if let Some(s) = self.screens.iter().find(|s| s.monitor.primary) {
-                        s.ink.window.focus();
-                    }
-                }
+        let sifted = sift(
+            events,
+            inputs,
+            self.selection.as_mut().map(|r| &mut r.chooser),
+        );
+        if let Some(regions) = self.selection.as_mut() {
+            for i in sifted.redraw {
+                regions.redraw(i);
             }
         }
-        out
+        if sifted.ended {
+            self.selection = None;
+            if let Some(s) = self.screens.iter().find(|s| s.monitor.primary) {
+                s.ink.window.focus();
+            }
+        }
+        sifted.out
     }
 
     /// The monitor the screen point (`x`, `y`) is on, by index; the primary's if it's on none.
@@ -1307,22 +1315,42 @@ impl Overlay {
         self.screens.len()
     }
 
-    /// Starts choosing a region on monitor `i` over `image` (what will be saved: the frame with
-    /// the drawing), which the selection shows still while the screen goes on underneath. The
+    /// Starts choosing a region on every monitor: `images[i]` is what monitor `i` will save
+    /// (its frame with its drawing), which its selection shows still while the screen goes on
+    /// underneath. The drag can start on any monitor, and the region stays on the monitor it
+    /// started on. `focus` (the monitor under the cursor) takes the keyboard, for Esc. The
     /// result comes as [`OverlayEvent::RegionChosen`] or [`OverlayEvent::RegionCancelled`].
     pub fn begin_region(
         &mut self,
-        i: usize,
-        image: &crate::save::Image,
+        focus: usize,
+        images: &[crate::save::Image],
     ) -> windows::core::Result<()> {
-        let Some(s) = self.screens.get(i) else {
-            return Ok(());
-        };
-        self.selection = Some(Selection::new(
-            &s.monitor,
-            image,
-            self.selection_events.clone(),
-        )?);
+        let mut windows = Vec::with_capacity(self.screens.len());
+        for (i, (s, image)) in self.screens.iter().zip(images).enumerate() {
+            windows.push(Selection::new(
+                i,
+                &s.monitor,
+                image,
+                self.selection_events.clone(),
+            )?);
+        }
+        // Shown together, the cursor's monitor's last: it takes the keyboard.
+        for w in windows.iter().filter(|w| w.screen != focus) {
+            w.layer.window.show(false);
+        }
+        if let Some(w) = windows
+            .iter()
+            .find(|w| w.screen == focus)
+            .or(windows.first())
+        {
+            w.layer.window.show(true);
+            w.layer.window.focus();
+        }
+        let sizes = windows.iter().map(|w| w.size()).collect();
+        self.selection = Some(Regions {
+            windows,
+            chooser: Chooser::new(sizes),
+        });
         Ok(())
     }
 
@@ -1331,9 +1359,12 @@ impl Overlay {
         self.selection.is_some()
     }
 
-    /// The selection window, while a region is being chosen (for checks to drive).
-    pub fn selection_window(&self) -> Option<HWND> {
-        self.selection.as_ref().map(|s| s.layer.window.hwnd())
+    /// Monitor `i`'s selection window, while a region is being chosen (for checks to drive).
+    pub fn selection_window(&self, i: usize) -> Option<HWND> {
+        self.selection
+            .as_ref()
+            .and_then(|r| r.windows.iter().find(|w| w.screen == i))
+            .map(|w| w.layer.window.hwnd())
     }
 
     /// The primary monitor's ink layer (for tests and checks to post keys to).
@@ -1375,8 +1406,152 @@ fn span(a: (i32, i32), b: (i32, i32)) -> Rect {
     )
 }
 
-/// Choosing a region: a window over one monitor, excluded from capture, showing the image to
-/// be saved still, darkened outside the rectangle being dragged.
+/// What [`sift`] made of a turn's events.
+#[derive(Debug, Default, PartialEq)]
+struct Sifted {
+    /// For the app: the layers' events, then the selection's outcome if it ended.
+    out: Vec<OverlayEvent>,
+    /// The monitors whose selection changed, to be shown again (while it goes on).
+    redraw: Vec<usize>,
+    /// The selection ended (chosen or cancelled): its windows go.
+    ended: bool,
+}
+
+/// One turn's events: the layers' `events`, and the selection windows' `inputs` run through
+/// `chooser` while a region is chosen. Everything the layers got in that turn arrived while the
+/// selection was up (even if it ends in the same turn), so only what
+/// [`reaches_ink_while_choosing`] lets through goes on.
+fn sift(
+    events: Vec<OverlayEvent>,
+    inputs: Vec<(usize, SelectionInput)>,
+    chooser: Option<&mut Chooser>,
+) -> Sifted {
+    let Some(chooser) = chooser else {
+        return Sifted {
+            out: events,
+            ..Sifted::default()
+        };
+    };
+    let mut sifted = Sifted {
+        out: events
+            .into_iter()
+            .filter(reaches_ink_while_choosing)
+            .collect(),
+        ..Sifted::default()
+    };
+    for (screen, input) in inputs {
+        let done = match chooser.input(screen, input) {
+            Choice::Going(None) => continue,
+            Choice::Going(Some(changed)) => {
+                if !sifted.redraw.contains(&changed) {
+                    sifted.redraw.push(changed);
+                }
+                continue;
+            }
+            Choice::Chosen { screen, rect } => OverlayEvent::RegionChosen { screen, rect },
+            Choice::Cancelled => OverlayEvent::RegionCancelled,
+        };
+        sifted.out.push(done);
+        sifted.ended = true;
+        sifted.redraw.clear();
+        break;
+    }
+    sifted
+}
+
+/// Choosing a region: each monitor's selection window, and the drag they share.
+struct Regions {
+    windows: Vec<Selection>,
+    chooser: Chooser,
+}
+
+impl Regions {
+    /// Shows monitor `i`'s drag as it is now.
+    fn redraw(&mut self, i: usize) {
+        let rect = self.chooser.rect(i);
+        if let Some(w) = self.windows.iter_mut().find(|w| w.screen == i) {
+            w.rect = rect;
+            w.redraw();
+        }
+    }
+}
+
+/// What a selection input did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Choice {
+    /// Still choosing; the monitor whose drag changed, to be shown again.
+    Going(Option<usize>),
+    /// A region on monitor `screen`, in its pixels.
+    Chosen { screen: usize, rect: Rect },
+    /// Esc on any monitor.
+    Cancelled,
+}
+
+/// The drag across the monitors' selection windows (each monitor's pixels): one at a time, on
+/// the monitor where its button went down, clipped to that monitor.
+struct Chooser {
+    /// Each monitor's size.
+    sizes: Vec<(i32, i32)>,
+    /// The drag: its monitor, where it started and the rectangle so far.
+    drag: Option<(usize, (i32, i32), Rect)>,
+}
+
+impl Chooser {
+    fn new(sizes: Vec<(i32, i32)>) -> Chooser {
+        Chooser { sizes, drag: None }
+    }
+
+    /// Monitor `i`'s rectangle so far (empty while nothing is dragged there).
+    fn rect(&self, i: usize) -> Rect {
+        match self.drag {
+            Some((at, _, r)) if at == i => r,
+            _ => Rect::default(),
+        }
+    }
+
+    /// The rectangle from `start` to `to` on monitor `i`, clipped to it (with the mouse
+    /// captured, a drag goes on past the monitor's edge).
+    fn span_on(&self, i: usize, start: (i32, i32), to: (i32, i32)) -> Rect {
+        let (w, h) = self.sizes[i];
+        span(start, to).clamp_to(w, h)
+    }
+
+    /// Monitor `screen`'s selection window got `input`.
+    fn input(&mut self, screen: usize, input: SelectionInput) -> Choice {
+        if input == SelectionInput::Escape {
+            return Choice::Cancelled;
+        }
+        if screen >= self.sizes.len() {
+            return Choice::Going(None);
+        }
+        match (input, self.drag) {
+            // Another monitor's input while a drag goes on waits for it to end.
+            (_, Some((at, ..))) if at != screen => Choice::Going(None),
+            (SelectionInput::Down(x, y), _) => {
+                let rect = self.span_on(screen, (x, y), (x, y));
+                self.drag = Some((screen, (x, y), rect));
+                Choice::Going(Some(screen))
+            }
+            (SelectionInput::Move(x, y), Some((at, start, _))) => {
+                self.drag = Some((at, start, self.span_on(at, start, (x, y))));
+                Choice::Going(Some(at))
+            }
+            (SelectionInput::Up(x, y), Some((at, start, _))) => {
+                let rect = self.span_on(at, start, (x, y));
+                self.drag = None;
+                // A click without a drag chooses nothing: keep choosing.
+                if rect.width() < 4 || rect.height() < 4 {
+                    Choice::Going(Some(at))
+                } else {
+                    Choice::Chosen { screen: at, rect }
+                }
+            }
+            // A move or a lift with no drag (the button went down elsewhere).
+            _ => Choice::Going(None),
+        }
+    }
+}
+
 /// A line of white text on a dark pill, for the region selection (drawn with core's own text
 /// shaping and Windows' fonts, as the Text tool is).
 struct Label {
@@ -1488,7 +1663,11 @@ fn hint_label(scale: f32) -> Option<Label> {
     Label::new(&crate::core::i18n::tr("region-hint"), scale)
 }
 
+/// One monitor's part of choosing a region: a window over it, excluded from capture, showing
+/// the image to be saved still, darkened outside the rectangle being dragged.
 struct Selection {
+    /// Its monitor's index.
+    screen: usize,
     layer: Layer,
     origin: (i32, i32),
     /// The monitor's scale, for the labels' size.
@@ -1499,15 +1678,18 @@ struct Selection {
     bright: Vec<u8>,
     shaded: Vec<u8>,
     width: i32,
-    start: Option<(i32, i32)>,
+    height: i32,
+    /// The rectangle being dragged here (empty while there's none).
     rect: Rect,
 }
 
 impl Selection {
+    /// Monitor `screen`'s selection window, made and filled but not shown yet.
     fn new(
+        screen: usize,
         monitor: &Monitor,
         image: &crate::save::Image,
-        inputs: Rc<RefCell<Vec<SelectionInput>>>,
+        inputs: Rc<RefCell<Vec<(usize, SelectionInput)>>>,
     ) -> windows::core::Result<Selection> {
         use windows::Win32::UI::WindowsAndMessaging::{WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE};
         let xy = |lp: windows::Win32::Foundation::LPARAM| {
@@ -1521,24 +1703,24 @@ impl Selection {
                 window::capture_mouse(hwnd);
                 inputs
                     .borrow_mut()
-                    .push(SelectionInput::Down(xy(lp).0, xy(lp).1));
+                    .push((screen, SelectionInput::Down(xy(lp).0, xy(lp).1)));
                 Some(LRESULT(0))
             }
             WM_MOUSEMOVE => {
                 inputs
                     .borrow_mut()
-                    .push(SelectionInput::Move(xy(lp).0, xy(lp).1));
+                    .push((screen, SelectionInput::Move(xy(lp).0, xy(lp).1)));
                 Some(LRESULT(0))
             }
             WM_LBUTTONUP => {
                 window::release_mouse();
                 inputs
                     .borrow_mut()
-                    .push(SelectionInput::Up(xy(lp).0, xy(lp).1));
+                    .push((screen, SelectionInput::Up(xy(lp).0, xy(lp).1)));
                 Some(LRESULT(0))
             }
             WM_KEYDOWN | WM_SYSKEYDOWN if wp.0 == 0x1B => {
-                inputs.borrow_mut().push(SelectionInput::Escape);
+                inputs.borrow_mut().push((screen, SelectionInput::Escape));
                 Some(LRESULT(0))
             }
             _ => None,
@@ -1568,11 +1750,10 @@ impl Selection {
         }
         let origin = (monitor.rect.left, monitor.rect.top);
         layer.present(origin)?;
-        layer.window.show(true);
-        layer.window.focus();
         let scale = monitor.scale();
         let hint = hint_label(scale);
         let mut selection = Selection {
+            screen,
             layer,
             origin,
             scale,
@@ -1580,7 +1761,7 @@ impl Selection {
             bright,
             shaded,
             width: monitor.rect.width(),
-            start: None,
+            height: monitor.rect.height(),
             rect: Rect::default(),
         };
         // The hint from the start, before anything is dragged.
@@ -1645,33 +1826,9 @@ impl Selection {
         }
     }
 
-    /// Takes one input; `Some(Some(rect))` when a region was chosen, `Some(None)` when it was
-    /// cancelled, `None` while it goes on.
-    fn input(&mut self, i: SelectionInput) -> Option<Option<Rect>> {
-        match i {
-            SelectionInput::Escape => return Some(None),
-            SelectionInput::Down(x, y) => {
-                self.start = Some((x, y));
-                self.rect = span((x, y), (x, y));
-            }
-            SelectionInput::Move(x, y) => {
-                let s = self.start?;
-                self.rect = span(s, (x, y));
-            }
-            SelectionInput::Up(x, y) => {
-                let s = self.start.take()?;
-                let r = span(s, (x, y));
-                // A click without a drag chooses nothing: keep choosing.
-                if r.width() < 4 || r.height() < 4 {
-                    self.rect = Rect::default();
-                    self.redraw();
-                    return None;
-                }
-                return Some(Some(r));
-            }
-        }
-        self.redraw();
-        None
+    /// Its monitor's size.
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 
@@ -1786,6 +1943,198 @@ mod tests {
             assert_eq!(Command::from_wparam(c.wparam()), Some(c));
         }
         assert_eq!(Command::from_wparam(99), None);
+    }
+
+    use SelectionInput::{Down, Escape, Move, Up};
+
+    /// Two monitors: A (0) at 1920 × 1080 and B (1) at 2560 × 1440.
+    fn two_monitors() -> Chooser {
+        Chooser::new(vec![(1920, 1080), (2560, 1440)])
+    }
+
+    /// The selection opened with the cursor on monitor A (it has the keyboard); the drag is on
+    /// monitor B: the region is B's, in B's pixels, and A shows no rectangle.
+    #[test]
+    fn a_region_is_chosen_on_whichever_monitor_the_drag_starts_on() {
+        let mut c = two_monitors();
+        assert_eq!(c.input(1, Down(100, 200)), Choice::Going(Some(1)));
+        assert_eq!(c.input(1, Move(300, 260)), Choice::Going(Some(1)));
+        assert_eq!(c.rect(1), Rect::new(100, 200, 301, 261));
+        assert!(c.rect(0).is_empty());
+        assert_eq!(
+            c.input(1, Up(400, 300)),
+            Choice::Chosen {
+                screen: 1,
+                rect: Rect::new(100, 200, 401, 301)
+            }
+        );
+        // And on A, the cursor's monitor, as before.
+        let mut c = two_monitors();
+        c.input(0, Down(10, 10));
+        assert_eq!(
+            c.input(0, Up(50, 60)),
+            Choice::Chosen {
+                screen: 0,
+                rect: Rect::new(10, 10, 51, 61)
+            }
+        );
+    }
+
+    /// The mouse is captured by the window the drag began in, so a drag past its monitor's
+    /// edge goes on there in that monitor's pixels: the region stops at the edge.
+    #[test]
+    fn a_region_is_clipped_to_the_monitor_its_drag_began_on() {
+        let mut c = two_monitors();
+        c.input(0, Down(1800, 1000));
+        c.input(0, Move(2500, 1300));
+        assert_eq!(c.rect(0), Rect::new(1800, 1000, 1920, 1080));
+        assert_eq!(
+            c.input(0, Up(-50, 1200)),
+            Choice::Chosen {
+                screen: 0,
+                rect: Rect::new(0, 1000, 1801, 1080)
+            }
+        );
+    }
+
+    /// One drag at a time: another monitor's input meanwhile waits; a click alone chooses
+    /// nothing and choosing goes on; Esc on any monitor cancels.
+    #[test]
+    fn one_drag_at_a_time_and_esc_anywhere_cancels() {
+        let mut c = two_monitors();
+        c.input(1, Down(100, 100));
+        assert_eq!(c.input(0, Down(5, 5)), Choice::Going(None));
+        assert_eq!(c.input(0, Up(500, 500)), Choice::Going(None));
+        assert!(matches!(
+            c.input(1, Up(200, 200)),
+            Choice::Chosen { screen: 1, .. }
+        ));
+        let mut c = two_monitors();
+        c.input(0, Down(5, 5));
+        assert_eq!(c.input(0, Up(6, 7)), Choice::Going(Some(0)), "a click");
+        assert!(c.rect(0).is_empty());
+        // A lift or a move with no drag (its button went down elsewhere) does nothing.
+        assert_eq!(c.input(1, Up(9, 9)), Choice::Going(None));
+        assert_eq!(c.input(1, Move(9, 9)), Choice::Going(None));
+        assert_eq!(
+            c.input(5, Down(9, 9)),
+            Choice::Going(None),
+            "no such monitor"
+        );
+        assert_eq!(c.input(1, Escape), Choice::Cancelled);
+        let mut c = two_monitors();
+        c.input(1, Down(5, 5));
+        assert_eq!(c.input(0, Escape), Choice::Cancelled, "mid-drag, elsewhere");
+    }
+
+    fn pointer(screen: usize, phase: Phase) -> OverlayEvent {
+        OverlayEvent::Pointer {
+            screen,
+            phase,
+            sample: crate::win32::pointer::Sample {
+                id: 1,
+                kind: crate::win32::pointer::PointerKind::Mouse,
+                x: 0,
+                y: 0,
+                pressure: None,
+                tilt: None,
+                eraser: false,
+                in_contact: phase != Phase::Up,
+                time_100ns: 0,
+            },
+            shift: false,
+        }
+    }
+
+    /// A turn whose selection ends (Esc, or the region's lift) still sifts the layers' events
+    /// that came in it: they arrived while the selection was up, so no press, move or
+    /// right-click from it reaches the app, only the lift, the keys and the outcome.
+    #[test]
+    fn the_layers_events_from_a_turn_the_selection_ends_in_are_sifted_too() {
+        let events = || {
+            vec![
+                OverlayEvent::RightClick { screen: 0 },
+                pointer(1, Phase::Down),
+                pointer(1, Phase::Move),
+                pointer(1, Phase::Up),
+                OverlayEvent::KeyUp(0x10),
+            ]
+        };
+        let kept = vec![pointer(1, Phase::Up), OverlayEvent::KeyUp(0x10)];
+        let mut c = two_monitors();
+        let sifted = sift(events(), vec![(0, Escape)], Some(&mut c));
+        let mut want = kept.clone();
+        want.push(OverlayEvent::RegionCancelled);
+        assert_eq!(
+            sifted,
+            Sifted {
+                out: want,
+                redraw: vec![],
+                ended: true
+            }
+        );
+        let mut c = two_monitors();
+        let inputs = vec![(1, Down(10, 10)), (1, Move(40, 40)), (1, Up(50, 60))];
+        let sifted = sift(events(), inputs, Some(&mut c));
+        let mut want = kept.clone();
+        want.push(OverlayEvent::RegionChosen {
+            screen: 1,
+            rect: Rect::new(10, 10, 51, 61),
+        });
+        assert_eq!((sifted.out, sifted.ended), (want, true));
+        // Still choosing: sifted, and the monitor dragged on is shown again, once.
+        let mut c = two_monitors();
+        let sifted = sift(
+            events(),
+            vec![(1, Down(10, 10)), (1, Move(40, 40))],
+            Some(&mut c),
+        );
+        assert_eq!(
+            sifted,
+            Sifted {
+                out: kept,
+                redraw: vec![1],
+                ended: false
+            }
+        );
+        // With no selection, everything goes on as it came.
+        let sifted = sift(events(), vec![(0, Escape)], None);
+        assert_eq!((sifted.out, sifted.ended), (events(), false));
+    }
+
+    /// While a region is chosen, nothing on an ink layer draws, erases, undoes or turns the
+    /// tool; a lift still comes (it ends a stroke begun before), and keys go on.
+    #[test]
+    fn only_lifts_and_keys_reach_the_ink_while_a_region_is_chosen() {
+        let sample = crate::win32::pointer::Sample {
+            id: 1,
+            kind: crate::win32::pointer::PointerKind::Mouse,
+            x: 0,
+            y: 0,
+            pressure: None,
+            tilt: None,
+            eraser: false,
+            in_contact: true,
+            time_100ns: 0,
+        };
+        let pointer = |phase| OverlayEvent::Pointer {
+            screen: 1,
+            phase,
+            sample,
+            shift: false,
+        };
+        assert!(!reaches_ink_while_choosing(&pointer(Phase::Down)));
+        assert!(!reaches_ink_while_choosing(&pointer(Phase::Move)));
+        assert!(reaches_ink_while_choosing(&pointer(Phase::Up)));
+        assert!(reaches_ink_while_choosing(&pointer(Phase::Leave)));
+        assert!(!reaches_ink_while_choosing(&OverlayEvent::RightClick {
+            screen: 1
+        }));
+        assert!(!reaches_ink_while_choosing(&OverlayEvent::Wheel {
+            screen: 0,
+            delta: 120
+        }));
+        assert!(reaches_ink_while_choosing(&OverlayEvent::KeyUp(0x50)));
     }
 
     #[test]

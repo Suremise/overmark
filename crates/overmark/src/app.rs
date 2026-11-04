@@ -12,6 +12,7 @@ use overmark_core::tr;
 use overmark_win::hotkeys::{Action, Hotkeys, RegisterError};
 use overmark_win::overlay::{
     Backdrop, Command, Look, Overlay, OverlayEvent, freeze_toggled, log_name,
+    reaches_ink_while_choosing,
 };
 use overmark_win::save;
 use overmark_win::win32::shell;
@@ -634,10 +635,10 @@ impl App {
                     self.raise_toolbar();
                 }
             }
-            // A right-click on another monitor's layer while a region is chosen keeps that as it
-            // was: it does nothing (Esc cancels).
-            OverlayEvent::RightClick { .. }
-                if self
+            // While a region is chosen, the ink layers under the selection never draw, erase
+            // or undo (Esc cancels the selection).
+            e if !reaches_ink_while_choosing(&e)
+                && self
                     .overlay
                     .as_ref()
                     .is_some_and(Overlay::is_choosing_region) => {}
@@ -1051,10 +1052,10 @@ fn seed_test_drawing(session: &mut Session) {
     session.width = width;
 }
 
-/// A capture waiting for its region to be chosen: the composed image of monitor `screen`.
+/// A capture waiting for its region to be chosen: each monitor's composed image, by index,
+/// since the region can be chosen on any of them.
 struct PendingRegion {
-    screen: usize,
-    image: overmark_win::save::Image,
+    images: Vec<overmark_win::save::Image>,
 }
 
 impl App {
@@ -1080,35 +1081,25 @@ impl App {
         self.settings.capture.resolve_save_folder(&pictures)
     }
 
-    /// Runs a capture command on the monitor under the cursor.
+    /// Runs a capture command on the monitor under the cursor. A region is chosen on any
+    /// monitor: each gets its selection, the cursor's taking the keyboard.
     fn capture(&mut self, command: Command) {
         let started = clock::now_secs();
         let (x, y) = shell::cursor();
         let with_drawing =
             command != Command::SaveWithoutDrawing && self.settings.capture.include_drawing;
-        let (now, fade) = (self.now_ms(), self.disappearing_ink_ms());
-        let Some(overlay) = self.overlay.as_mut() else {
+        let Some(overlay) = self.overlay.as_ref() else {
             return;
         };
+        if command == Command::SaveRegion {
+            // A stroke still down (Ctrl+Shift+S pressed mid-drag) ends where it is, in the
+            // image and the drawing: nothing during the selection adds to it.
+            self.ink.end_contact();
+        }
         let screen = overlay.screen_at(x, y);
+        let count = overlay.screen_count();
         let monitor = overlay.monitor(screen).cloned();
-        let Some(frame) = overlay.capture_frame(screen) else {
-            tracing::error!(screen, "no clean grab for a capture");
-            self.toast_text(
-                screen,
-                &tr("toast-capture-no-image"),
-                Vec::new(),
-                None,
-                None,
-            );
-            return;
-        };
-        let drawing = with_drawing
-            .then(|| self.ink.session(screen).map(Session::drawing))
-            .flatten();
-        let guides = overlay.save_guides(screen);
-        let Some(image) = save::compose(&frame, guides.as_ref(), drawing, now, fade) else {
-            tracing::error!("the capture couldn't be composed");
+        let Some(image) = self.compose(screen, with_drawing) else {
             self.toast_text(
                 screen,
                 &tr("toast-capture-no-image"),
@@ -1128,18 +1119,69 @@ impl App {
             ms = (clock::now_secs() - started) * 1000.0,
             "captured"
         );
-        if command == Command::SaveRegion {
-            match overlay.begin_region(screen, &image) {
-                Ok(()) => self.pending_region = Some(PendingRegion { screen, image }),
-                Err(error) => {
-                    tracing::error!(%error, "couldn't start choosing a region");
-                    let text = tr!("toast-capture-failed", reason = error.message());
-                    self.toast_text(screen, &text, Vec::new(), None, None);
-                }
-            }
+        if command != Command::SaveRegion {
+            self.deliver(screen, &image, command, with_drawing);
             return;
         }
-        self.deliver(screen, &image, command, with_drawing);
+        // The other monitors' images, for a region chosen on one of them.
+        let mut cursors = Some(image);
+        let mut images = Vec::with_capacity(count);
+        for i in 0..count {
+            let image = if i == screen {
+                cursors.take()
+            } else {
+                self.compose(i, with_drawing)
+            };
+            let Some(image) = image else {
+                self.toast_text(
+                    screen,
+                    &tr("toast-capture-no-image"),
+                    Vec::new(),
+                    None,
+                    None,
+                );
+                return;
+            };
+            images.push(image);
+        }
+        let Some(overlay) = self.overlay.as_mut() else {
+            return;
+        };
+        match overlay.begin_region(screen, &images) {
+            Ok(()) => {
+                tracing::info!(
+                    screens = count,
+                    ms = (clock::now_secs() - started) * 1000.0,
+                    "choosing a region"
+                );
+                self.pending_region = Some(PendingRegion { images });
+            }
+            Err(error) => {
+                tracing::error!(%error, "couldn't start choosing a region");
+                let text = tr!("toast-capture-failed", reason = error.message());
+                self.toast_text(screen, &text, Vec::new(), None, None);
+            }
+        }
+    }
+
+    /// Monitor `screen`'s capture as it would be saved: its clean frame, the guides if they
+    /// are saved, and its drawing when `with_drawing`. `None` (logged) without a clean frame.
+    fn compose(&mut self, screen: usize, with_drawing: bool) -> Option<save::Image> {
+        let (now, fade) = (self.now_ms(), self.disappearing_ink_ms());
+        let overlay = self.overlay.as_mut()?;
+        let Some(frame) = overlay.capture_frame(screen) else {
+            tracing::error!(screen, "no clean grab for a capture");
+            return None;
+        };
+        let drawing = with_drawing
+            .then(|| self.ink.session(screen).map(Session::drawing))
+            .flatten();
+        let guides = overlay.save_guides(screen);
+        let image = save::compose(&frame, guides.as_ref(), drawing, now, fade);
+        if image.is_none() {
+            tracing::error!(screen, "the capture couldn't be composed");
+        }
+        image
     }
 
     /// Copies and/or saves `image`, as `command` and the settings say, and tells the user.
@@ -1232,20 +1274,22 @@ impl App {
         let Some(p) = self.pending_region.take() else {
             return;
         };
-        if p.screen != screen {
-            tracing::warn!(screen, "a region on another monitor than the capture's");
-        }
-        match save::crop(&p.image, rect) {
+        match p
+            .images
+            .get(screen)
+            .and_then(|image| save::crop(image, rect))
+        {
             Some(img) => {
                 tracing::info!(
                     left = rect.left,
                     top = rect.top,
                     width = img.width,
                     height = img.height,
+                    screen,
                     "region chosen"
                 );
                 let with_drawing = self.settings.capture.include_drawing;
-                self.deliver(p.screen, &img, Command::SaveRegion, with_drawing);
+                self.deliver(screen, &img, Command::SaveRegion, with_drawing);
             }
             None => tracing::warn!("the region was empty"),
         }

@@ -375,8 +375,9 @@ fn main() {
         TEST_X1 as i32 + 20,
         TEST_MARKER_Y as i32 + 30,
     );
+    // Every monitor has a selection window: this one is over `m`.
     match app.window(Duration::from_secs(3), |w| {
-        w.title == overmark_core::i18n::tr("window-selection-name") && w.visible
+        w.title == overmark_core::i18n::tr("window-selection-name") && w.visible && w.rect == m.rect
     }) {
         Some(sel) => {
             let at = |x: i32, y: i32| ((y as isize) << 16) | (x as isize & 0xFFFF);
@@ -427,6 +428,44 @@ fn main() {
             files.extend(f);
         }
         None => results.push(("Live: a region".into(), false, "no selection window".into())),
+    }
+
+    // A region on each other monitor, wherever the cursor is: the selection covers them all.
+    for other in dpi::monitors().into_iter().filter(|o| o.rect != m.rect) {
+        let name = format!("Live: a region on {}", other.name);
+        window::post(
+            ink.hwnd,
+            WM_OVERMARK_COMMAND,
+            Capture::SaveRegion.wparam(),
+            0,
+        );
+        let Some(sel) = app.window(Duration::from_secs(3), |w| {
+            w.title == overmark_core::i18n::tr("window-selection-name")
+                && w.visible
+                && w.rect == other.rect
+        }) else {
+            results.push((name, false, "no selection window on it".into()));
+            continue;
+        };
+        let at = |x: i32, y: i32| ((y as isize) << 16) | (x as isize & 0xFFFF);
+        window::post(sel.hwnd, WM_LBUTTONDOWN, 1, at(100, 100));
+        window::post(sel.hwnd, WM_MOUSEMOVE, 1, at(300, 250));
+        window::post(sel.hwnd, WM_LBUTTONUP, 0, at(300, 250));
+        let f = app
+            .wait_for(" delivered", Duration::from_secs(5))
+            .and_then(|l| saved_file(&l));
+        match &f {
+            Some(p) => {
+                let img = read_png(p);
+                results.push((
+                    name,
+                    (img.width(), img.height()) == (201, 151),
+                    format!("{}x{} (dragged 201x151)", img.width(), img.height()),
+                ));
+            }
+            None => results.push((name, false, "no file".into())),
+        }
+        files.extend(f);
     }
     window::post(
         ink.hwnd,
