@@ -340,6 +340,15 @@ Settings (About and advanced) takes you there. It holds at most three files of 1
 never what you drew or typed. Attach it when you
 [report a problem](https://github.com/Suremise/overmark/issues).
 
+### The layer's keys do nothing until you click it
+
+Opened over a full-screen remote desktop or virtual machine window, the layer may not get the
+keyboard: the keys you press (Ctrl+Shift+S, Esc, a tool's letter) still go to that window. Click
+the layer once (or leave the remote window before you open it) and its keys work. Overmark logs
+whether the layer got the keyboard when it opens, and whenever the keyboard leaves it or comes
+back ([the logs](#the-logs)). Please [report it](https://github.com/Suremise/overmark/issues)
+with the log attached, whatever the log says: the cause isn't known yet.
+
 ### The layer opens on the wrong monitor, or captures the wrong one
 
 Captures and the toolbar follow the **pointer**: move it to the monitor you want before you
