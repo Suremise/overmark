@@ -122,6 +122,13 @@ where a reviewer can read them.
   own window's handle, UI Automation patterns on elements found by your own process ID or
   window handle, or egui's AccessKit tree in your own process. If you can't, don't drive the
   real UI: prove it with tests, and say so in the summary.
+- **Never activate a real window,** your own included, in tests or probes: don't send or post
+  `WM_ACTIVATE` to one, and don't call `SetActiveWindow` or `SetForegroundWindow` on it.
+  `DefWindowProc`'s handling of `WM_ACTIVATE` sets the focus and activates the window for real,
+  even with the minimised flag set, so it takes the user's foreground. To test activation
+  handling, call the window procedure or handler directly (as
+  `overlay::tests::an_ink_layer_says_when_it_is_activated` does); for z-order, use helpers that
+  don't activate, such as `window::to_top`.
 
 ## Disk space
 
