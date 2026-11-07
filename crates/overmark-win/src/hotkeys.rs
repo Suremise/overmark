@@ -18,6 +18,9 @@ pub enum Action {
     DrawFrozen,
     /// Capture a region, as the tray's "Capture a region…" does.
     CaptureRegion,
+    /// Record a region (screen capture, no drawing layer), as the tray's "Record a region…"
+    /// does; pressed again, it stops and saves.
+    RecordRegion,
     /// Open the layer on the whiteboard (Settings' `backdrops.hotkey_whiteboard`, unset by
     /// default).
     DrawWhiteboard,

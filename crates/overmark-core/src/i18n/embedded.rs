@@ -339,7 +339,8 @@ ui.label("In a test");
         let english = english();
         for key in [
             // The tray.
-            "tray-tooltip-shortcut",
+            "tray-tooltip-group",
+            "tray-tooltip-key",
             "tray-draw",
             "tray-draw-frozen",
             "tray-capture-region",
@@ -434,9 +435,9 @@ ui.label("In a test");
         );
         assert_eq!(tip, "Rectangle (R): hold Shift for a square");
         let tip = english.tr_args(
-            "tray-tooltip-shortcut",
-            &crate::i18n::args([("action", "Draw".into()), ("hotkey", "Win+Shift+D".into())]),
+            "tray-tooltip-group",
+            &crate::i18n::args([("modifiers", "Win+Shift".into()), ("keys", "D Draw".into())]),
         );
-        assert_eq!(tip, "Draw: Win+Shift+D");
+        assert_eq!(tip, "Win+Shift: D Draw");
     }
 }

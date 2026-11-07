@@ -22,6 +22,7 @@ settings-hotkeys-help = They work in any app, while Overmark is in the tray.
 settings-hotkey-draw = Draw
 settings-hotkey-draw-frozen = Draw on a frozen screen
 settings-hotkey-capture-region = Capture a region
+settings-hotkey-record-region = Record a region (screen capture)
 settings-hotkey-change = Change
 # $action: which hotkey ("Draw").
 settings-hotkey-change-named = Change the hotkey for { $action }

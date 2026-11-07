@@ -16,6 +16,9 @@ hotkey_draw_frozen = "Win+Shift+F"
 # The hotkey that captures a region, as the tray's Capture a region… does (default
 # "Win+Shift+X"). "" turns it off.
 hotkey_capture_region = "Win+Shift+X"
+# The hotkey that records a region of the screen to a video, as the tray's Record a
+# region… does; pressed again, it stops and saves (default "Win+Alt+V"). "" turns it off.
+hotkey_record_region = "Win+Alt+V"
 # What Print Screen does: "off" (Windows keeps it; the default), "live" or "frozen". Windows 11
 # sends Print Screen to the Snipping Tool unless you turn that off in its Settings.
 print_screen = "off"

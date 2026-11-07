@@ -31,6 +31,7 @@ const MENU_START_WITH_WINDOWS: u32 = 6;
 const MENU_CHECK_UPDATES: u32 = 7;
 const MENU_ABOUT: u32 = 8;
 const MENU_QUIT: u32 = 9;
+const MENU_RECORD_REGION: u32 = 10;
 
 /// A [`overmark_win::win32::tray::Waker`] code: the update check has an answer.
 const WAKE_UPDATE: u32 = 1;
@@ -255,6 +256,7 @@ impl App {
             Ok(Some(MENU_DRAW)) => self.open(Backdrop::Live, clock::now_100ns()),
             Ok(Some(MENU_DRAW_FROZEN)) => self.open(Backdrop::Frozen, clock::now_100ns()),
             Ok(Some(MENU_CAPTURE_REGION)) => self.capture_region(),
+            Ok(Some(MENU_RECORD_REGION)) => self.record_region_hotkey(),
             Ok(Some(MENU_OPEN_CAPTURES)) => self.open_captures(),
             Ok(Some(MENU_SETTINGS)) => self.open_settings(Page::General),
             Ok(Some(MENU_START_WITH_WINDOWS)) => self.toggle_autostart(!starts),
@@ -380,6 +382,10 @@ impl App {
             (
                 "general.hotkey_capture_region",
                 a.general.hotkey_capture_region != b.general.hotkey_capture_region,
+            ),
+            (
+                "general.hotkey_record_region",
+                a.general.hotkey_record_region != b.general.hotkey_record_region,
             ),
             (
                 "general.print_screen",
@@ -565,6 +571,10 @@ pub fn menu_items(
                 &settings.general.hotkey_capture_region,
             ),
         ),
+        command(
+            MENU_RECORD_REGION,
+            label("tray-record-region", &settings.general.hotkey_record_region),
+        ),
         MenuItem::Separator,
         command(MENU_OPEN_CAPTURES, tr("tray-open-captures")),
         command(MENU_SETTINGS, tr("tray-settings")),
@@ -619,6 +629,7 @@ mod tests {
                 "Draw\tWin+Shift+D",
                 "Draw on a frozen screen\tWin+Shift+F",
                 "Capture a region…\tWin+Shift+X",
+                "Record a region…\tWin+Alt+V",
                 "---",
                 "Open captures folder",
                 "Settings…",
@@ -634,8 +645,8 @@ mod tests {
         let on = texts(&menu_items(&settings, false, label));
         assert_eq!(on[0], "Draw");
         assert_eq!(on[2], "Capture a region…");
-        assert_eq!(on[6], "Start with Windows");
-        assert_eq!(&on[8..], ["Check for updates…", "About Overmark", "Quit"]);
+        assert_eq!(on[7], "Start with Windows");
+        assert_eq!(&on[9..], ["Check for updates…", "About Overmark", "Quit"]);
     }
 
     #[test]

@@ -1367,11 +1367,13 @@ the theme, the DPI or Explorer changes (`WM_SETTINGCHANGE`, `WM_THEMECHANGED`, `
 - **Clicks:** a click does what Settings says (Live, Frozen or Settings). As a double-click opens
   Settings, a click that opens the layer waits for Windows' double-click time first (500 ms by
   default), so a double-click opens Settings and nothing else; Enter on the icon acts at once.
-- **The menu** has the hotkeys beside Draw, Draw on a frozen screen and Capture a region…, and
+- **The menu** has the hotkeys beside Draw, Draw on a frozen screen, Capture a region… and Record a
+  region… (see Screen-capture recording), and
   Start with Windows ticked from the Run value. "Check for updates…" is there only when it's on.
   "Capture a region…" freezes the screen, lets the region be chosen, and closes the layer after.
 - **Balloons:** a hotkey notice opens Settings when clicked; a new release's opens its page.
-- **Hotkeys:** Draw, Draw Frozen, Capture a region and Print Screen (Off, Live or Frozen) are
+- **Hotkeys:** Draw, Draw Frozen, Capture a region, Record a region and Print Screen (Off, Live or
+  Frozen) are
   registered with `RegisterHotKey`, with the whiteboard's and blackboard's; what became of each
   is published for Settings (below).
 
@@ -1676,3 +1678,91 @@ defaults (the released fixtures).
   to whole 16-pixel blocks (680 x 162 comes as 688 x 176), so rows are read at the padded pitch;
   tested with an unaligned width (`an_unaligned_width_decodes_back_in_place`). The first run of
   the check read them at 680 and saw no stroke: the video had it, as Edge showed.
+
+### Screen-capture recording
+
+**The two modes:** recording while annotating lives in the drawing layer (its toolbar's
+Record); **screen capture** has no layer at all, only the box, its outline and its bar, over
+the apps, which go on being used (Task Manager's graphs while working in it). Screen capture is
+started **only from the tray's "Record a region…" and its hotkey, never from the drawing
+toolbar** (a deliberate choice: from the toolbar it would mean leaving the layer for another mode,
+the layer and toolbar gone, which is more to explain than a separate entry). Both modes use the
+same `RecordBox`, bar, outline, `[recording]` settings and engine.
+
+**The hotkey, Win+Alt+V** (`general.hotkey_record_region`, a Settings slot like the others,
+registered with `RegisterHotKey`, the taken-key notice as for the others): V for video, beside
+Windows' own Win+Alt+R (the Game Bar's recording). Chosen by probing every letter and digit with
+Win+Shift and Win+Alt (`win32::hotkey_probe`, 7 Nov 2026, Windows 11 25H2): with Win+Shift only
+B E G H I J K L N O Q U Y Z were free besides Overmark's own D F X (R and V are Windows');
+with Win+Alt, A C E H I J L N O P Q S U V X Z. **Pressed again it ends the box**: on a
+recording it stops and saves; before recording it closes the box. The bar never has the
+keyboard, so Esc can't reach it. Pressed while a box is being chosen, it stops choosing. **With
+the drawing layer open, it only says so** (`toast-record-layer-open`: close the layer, or record
+with the drawing from its toolbar): screen capture is the mode without the layer, and a key never
+closes the layer and loses the drawing. `app::recording::hotkey_does` decides (tested in every
+state): a box open ends it (a recording, paused or asking whether to discard, is stopped and
+saved; one not yet recording closes), then a box being chosen is cancelled, then the layer's
+notice, else a box is chosen.
+
+**The flow** (`app::recording`): the hotkey or the menu → `region::Picker` over GDI grabs of each
+monitor (none of our windows is up), the cursor's monitor taking the keyboard for Esc → when it
+ends, the keyboard goes back to the window that had it (`give_focus_back`) → `RecordBox` with
+the box placed (one monitor, even sides) → the bar's Record, Pause, Resume, Stop, ✕ as in the
+annotate mode. The notice shows on the box's monitor. **Which notices Settings can turn off:** only a plain
+"saved" follows "Show a notice after each capture" (`capture.toast`); a problem (a failure to
+start or save, a recording that stopped by itself, with its reason) and an instruction (the
+layer is open) always show, as they're the only way the user hears of them
+(`app::recording::notice_shows`, tested; the check runs with capture notices off). The tray's tooltip says "Overmark:
+recording" while a box records. Closing or opening the drawing layer leaves a screen recording
+alone (only the layer's own box is stopped with it).
+
+**Over the apps:** the outline is click-through (`WS_EX_TRANSPARENT`), never activated, and
+excluded from capture; the bar is the toolbar's kind of panel: never activated (clicking it
+leaves the keyboard with your app), only its drawn pixels taking the pointer (the transparent
+rest of its window passes clicks to the app under it), excluded from capture. **Kept on top:**
+top-most windows go over normal ones, but another top-most window shown later (Task Manager's
+Always on top) can cover the bar, and nothing tells us when short of a hook. So while a screen
+recording's box is open, the bar and outline go back on top (`SetWindowPos(HWND_TOPMOST)`,
+without activating) every 500 ms (`core::record::Reassert`, tested; the loop wakes for it only
+while a box is open). **The limits:** the Start menu, the shell's flyouts, Win+Tab, a UAC prompt
+and the lock screen are above every top-most window; the bar comes back when they close. A UAC
+prompt or a lock switches to the secure desktop, which ends the recording and saves it
+(Desktop Duplication's access is lost: see Recording).
+
+**The tray's tooltip, tidied:** it holds 127 UTF-16 units, and with a line a hotkey ("Draw:
+Win+Shift+D"), Record a region's line and both boards' would have taken 168: lines were left
+out. Now the hotkeys that
+share their modifiers go on one line, each as its key and a short name
+(`tray-tooltip-group`, `tray-tooltip-key`; `app::hotkey_lines`):
+
+```
+Before (0.2.1, the defaults: 93 of 127)       After (the defaults: 67)
+Overmark                                      Overmark
+Draw: Win+Shift+D                             Win+Shift: D Draw · F Frozen · X Capture
+Draw on a frozen screen: Win+Shift+F          Win+Alt: V Record
+Capture a region: Win+Shift+X
+```
+
+With both boards' hotkeys set as well, it's 96; while drawing on a board, 118: every hotkey fits
+(tested). Groups that still don't fit (unusual hotkeys, a long translation) are left
+out from the end, whole. The taken-hotkey notice keeps the full names.
+
+**Checked:** unit tests for the setting (its default, the documented file, the released
+fixtures), the hotkey's parse and the conflict list, the menu's order, the Settings slot, the
+tooltip (grouping, a key with no modifiers, every default with both boards in every state, a
+long translation) and `Reassert`. **The real exe:** `cargo run -p overmark --release --example
+record_screen_check` (`--no-activate --no-grabber`, temp folders, a window of the check's own as
+the app under the box, the foreground checked after every step; refuses beside a running
+Overmark). The hotkey is posted to the app's hotkey window, the box dragged on its selection
+window, the bar pressed through UI Automation. A box at the monitor's top: the bar inside its
+top edge; the outline lets the pointer through to the app (`WindowFromPoint` on it finds the
+app's window); a top-most window put over the bar is under it again within 1.5 s; the app changes
+colour while recording, and the video has both colours, and the app (not the bar or the outline)
+where they are; pause, resume, and the hotkey again saves. Esc on the selection cancels, and
+so does the hotkey pressed during it; the hotkey on a box not yet recording closes it; Discard
+asks and leaves no file; with the drawing layer open the hotkey opens nothing and the layer
+stays. Run on 7 Nov 2026:
+14 of 14 (with capture notices off: no notice after a plain save, the layer's instruction
+shown), the foreground the user's window throughout. **Not checked:** the tray menu's item
+itself (opening the menu would take the foreground; it calls the same code as the hotkey), two
+monitors, Windows 10.

@@ -13,6 +13,14 @@ All notable changes to Overmark are recorded here. The format is based on
   MP4s, saved in the captures folder with the usual notice; there's no sound. Closing the layer
   while recording saves first. Settings › Capture › Recording sets the frame rate, the quality,
   the mouse pointer and the encoder.
+- **Record without drawing:** Record a region… in the tray menu, or Win+Alt+V, records a box of
+  the screen while you go on using your apps; press the hotkey again to stop and save. The
+  hotkey can be changed in Settings.
+
+### Changed
+
+- The tray icon's tooltip groups the hotkeys that share their modifiers on one line, so every
+  hotkey fits.
 
 ## [0.2.1] - 2026-11-04
 

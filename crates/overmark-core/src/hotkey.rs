@@ -568,6 +568,7 @@ mod tests {
             &s.general.hotkey_draw,
             &s.general.hotkey_draw_frozen,
             &s.general.hotkey_capture_region,
+            &s.general.hotkey_record_region,
         ] {
             assert!(matches!(Hotkey::parse(text), Ok(Some(_))), "{text}");
         }

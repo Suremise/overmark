@@ -255,6 +255,47 @@ pub fn timer_text(elapsed: std::time::Duration) -> String {
     }
 }
 
+/// How often a screen recording's bar and outline go back on top, in milliseconds: another
+/// always-on-top window (Task Manager's, say) can cover them, and nothing tells us when, short
+/// of a hook. Twice a second is quick enough to see and costs nothing.
+pub const REASSERT_MS: u64 = 500;
+
+/// When to put the bar and outline back on top: the first time at once, then every `every_ms`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reassert {
+    every_ms: u64,
+    last_ms: Option<u64>,
+}
+
+impl Reassert {
+    pub const fn new(every_ms: u64) -> Reassert {
+        Reassert {
+            every_ms,
+            last_ms: None,
+        }
+    }
+
+    /// Whether it's time at `now_ms` (any clock in milliseconds); if so, the time is counted
+    /// from now.
+    pub fn due(&mut self, now_ms: u64) -> bool {
+        let due = self
+            .last_ms
+            .is_none_or(|last| now_ms.saturating_sub(last) >= self.every_ms);
+        if due {
+            self.last_ms = Some(now_ms);
+        }
+        due
+    }
+
+    /// How long from `now_ms` until it's next due: the loop's wait.
+    pub fn wait_ms(&self, now_ms: u64) -> u64 {
+        match self.last_ms {
+            None => 0,
+            Some(last) => (last + self.every_ms).saturating_sub(now_ms),
+        }
+    }
+}
+
 /// The highest bitrate the encoder may reach for a moment, for a given average.
 pub const fn peak_bitrate(average: u32) -> u32 {
     average.saturating_mul(2)

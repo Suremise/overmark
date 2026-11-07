@@ -125,6 +125,12 @@ struct App {
     record: Option<crate::record_bar::RecordBox>,
     /// The region being chosen is the box to record (the toolbar's Record), not a save.
     pending_record: bool,
+    /// The box is a screen recording's (no drawing layer), not the layer's.
+    record_screen_mode: bool,
+    /// A screen recording's box being chosen.
+    screen_pick: Option<recording::ScreenPick>,
+    /// When a screen recording's bar and outline next go back on top.
+    reassert: overmark_core::record::Reassert,
 }
 
 fn action_name(action: Action) -> String {
@@ -132,6 +138,19 @@ fn action_name(action: Action) -> String {
         Action::Draw => tr("tray-draw"),
         Action::DrawFrozen => tr("tray-draw-frozen"),
         Action::CaptureRegion => tr("tray-tooltip-capture-region"),
+        Action::RecordRegion => tr("tray-action-record-region"),
+        Action::DrawWhiteboard => Backdrop::Whiteboard.name(),
+        Action::DrawBlackboard => Backdrop::Blackboard.name(),
+    }
+}
+
+/// An action's short name in the tray's tooltip, beside its key ("D Draw").
+fn tooltip_name(action: Action) -> String {
+    match action {
+        Action::Draw => tr("tray-tooltip-draw"),
+        Action::DrawFrozen => tr("tray-tooltip-draw-frozen"),
+        Action::CaptureRegion => tr("tray-tooltip-capture"),
+        Action::RecordRegion => tr("tray-tooltip-record"),
         Action::DrawWhiteboard => Backdrop::Whiteboard.name(),
         Action::DrawBlackboard => Backdrop::Blackboard.name(),
     }
@@ -140,27 +159,77 @@ fn action_name(action: Action) -> String {
 /// The most a tray tooltip holds, in UTF-16 units (`szTip` is 128 with its terminator).
 const TOOLTIP_MAX: usize = 127;
 
-/// The tray's tooltip: what Overmark is doing (or its name) on the first line, then a line
-/// for each hotkey registered (`shortcuts`: its action and keys). Lines that don't fit in
+/// What the tray's tooltip says first: drawing (on which backdrop), recording, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TipState {
+    drawing: Option<Backdrop>,
+    recording: bool,
+}
+
+/// The tray's tooltip: what Overmark is doing (or its name) on the first line, then the hotkeys
+/// registered (`hotkeys`: each one's short name and keys), **grouped by their modifiers**, a line
+/// a group: "Win+Shift: D Draw · F Frozen · X Capture". Groups that don't fit in
 /// [`TOOLTIP_MAX`] are left out from the end, whole; idle with none, it says to click.
-fn tooltip_text(drawing: Option<Backdrop>, shortcuts: &[(String, String)]) -> String {
-    let first = match drawing {
-        Some(Backdrop::Live) => tr("tray-tooltip-live"),
-        Some(Backdrop::Frozen) => tr("tray-tooltip-frozen"),
-        Some(b @ (Backdrop::Whiteboard | Backdrop::Blackboard)) => {
-            tr!("tray-tooltip-board", backdrop = b.name())
-        }
-        None if shortcuts.is_empty() => tr("tray-tooltip-no-hotkey"),
-        None => tr("app-name"),
+fn tooltip_text(state: TipState, hotkeys: &[(String, Hotkey)]) -> String {
+    let first = match state {
+        TipState {
+            recording: true, ..
+        } => tr("tray-tooltip-recording"),
+        TipState {
+            drawing: Some(Backdrop::Live),
+            ..
+        } => tr("tray-tooltip-live"),
+        TipState {
+            drawing: Some(Backdrop::Frozen),
+            ..
+        } => tr("tray-tooltip-frozen"),
+        TipState {
+            drawing: Some(b @ (Backdrop::Whiteboard | Backdrop::Blackboard)),
+            ..
+        } => tr!("tray-tooltip-board", backdrop = b.name()),
+        TipState { drawing: None, .. } if hotkeys.is_empty() => tr("tray-tooltip-no-hotkey"),
+        TipState { drawing: None, .. } => tr("app-name"),
     };
-    let lines = shortcuts.iter().map(|(action, hotkey)| {
-        tr!(
-            "tray-tooltip-shortcut",
-            action = action.as_str(),
-            hotkey = hotkey.as_str()
-        )
-    });
-    fit_lines(first, &tr("app-name"), lines, TOOLTIP_MAX)
+    fit_lines(first, &tr("app-name"), hotkey_lines(hotkeys), TOOLTIP_MAX)
+}
+
+/// The tooltip's hotkey lines: one for each set of modifiers, in the order they first come,
+/// each hotkey on it as its key and its name.
+fn hotkey_lines(hotkeys: &[(String, Hotkey)]) -> Vec<String> {
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    for (name, h) in hotkeys {
+        let key = h.key.display();
+        let full = h.display();
+        let modifiers = full
+            .strip_suffix(&key)
+            .map(|m| m.trim_end_matches('+').to_owned())
+            .unwrap_or_default();
+        let entry = tr!(
+            "tray-tooltip-key",
+            key = key.as_str(),
+            action = name.as_str()
+        );
+        match groups.iter_mut().find(|(m, _)| *m == modifiers) {
+            Some((_, entries)) => entries.push(entry),
+            None => groups.push((modifiers, vec![entry])),
+        }
+    }
+    let separator = tr("tray-tooltip-separator");
+    groups
+        .into_iter()
+        .map(|(modifiers, entries)| {
+            let keys = entries.join(&separator);
+            if modifiers.is_empty() {
+                keys
+            } else {
+                tr!(
+                    "tray-tooltip-group",
+                    modifiers = modifiers.as_str(),
+                    keys = keys.as_str()
+                )
+            }
+        })
+        .collect()
 }
 
 /// `first`, then each of `lines` on a line of its own while the whole stays within `max`
@@ -191,12 +260,16 @@ fn fit_lines(
 
 impl App {
     fn tooltip(&self) -> String {
-        let shortcuts: Vec<_> = self
+        let hotkeys: Vec<_> = self
             .registered
             .iter()
-            .map(|(action, hotkey)| (action_name(*action), hotkey.display()))
+            .map(|(action, hotkey)| (tooltip_name(*action), *hotkey))
             .collect();
-        tooltip_text(self.overlay.as_ref().map(Overlay::backdrop), &shortcuts)
+        let state = TipState {
+            drawing: self.overlay.as_ref().map(Overlay::backdrop),
+            recording: self.record.as_ref().is_some_and(|b| b.is_recording()),
+        };
+        tooltip_text(state, &hotkeys)
     }
 
     /// Shows the layer's state in the tray: its tooltip and its icon.
@@ -237,6 +310,11 @@ impl App {
                 Action::CaptureRegion,
                 "general.hotkey_capture_region",
                 general.hotkey_capture_region.clone(),
+            ),
+            (
+                Action::RecordRegion,
+                "general.hotkey_record_region",
+                general.hotkey_record_region.clone(),
             ),
             (
                 Action::DrawWhiteboard,
@@ -454,7 +532,7 @@ impl App {
             collapsed: self.toolbar_collapsed,
             disappearing_ink: self.settings.drawing.disappearing_ink,
             right_click_undoes: self.settings.drawing.right_click_undoes,
-            recording: self.record.is_some() || self.pending_record,
+            recording: self.record.is_some() || self.pending_record || self.screen_pick.is_some(),
         }
     }
 
@@ -575,7 +653,10 @@ impl App {
     /// Closes the overlay: the strokes vanish: each opening starts clean. A recording is
     /// stopped and saved first: closing never loses one.
     fn close(&mut self) {
-        self.finish_recording();
+        // The layer's own box (a screen recording's isn't the layer's, and goes on).
+        if !self.record_screen_mode {
+            self.finish_recording();
+        }
         self.pending_record = false;
         if let Some(tb) = self.toolbar.take() {
             self.toolbar_look = Some(tb.close());
@@ -843,10 +924,7 @@ impl App {
                 .as_ref()
                 .and_then(|_| self.wake.timeout(FRAME_MS));
             let bar = self.toolbar.as_ref().and_then(Toolbar::wait_ms);
-            let record = self
-                .record
-                .as_ref()
-                .and_then(crate::record_bar::RecordBox::wait_ms);
+            let record = self.record_wait_ms();
             // A click waiting for its double-click time comes back when that's up.
             let soonest = |a: Option<u32>, b: Option<u32>| match (a, b) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -903,6 +981,11 @@ impl App {
                 // Exactly as the tray's item: the screen frozen, then a region chosen on it.
                 Action::CaptureRegion => {
                     self.capture_region();
+                    continue;
+                }
+                // Starts a screen recording's box; pressed again, it ends it (saving).
+                Action::RecordRegion => {
+                    self.record_region_hotkey();
                     continue;
                 }
                 Action::Draw => Backdrop::Live,
@@ -1055,6 +1138,9 @@ pub fn run(args: Args) -> i32 {
         toolbar_collapsed: false,
         record: None,
         pending_record: false,
+        record_screen_mode: false,
+        screen_pick: None,
+        reassert: overmark_core::record::Reassert::new(overmark_core::record::REASSERT_MS),
     };
     for n in &startup.notices {
         tracing::warn!(title = %n.title, body = %n.body, "start-up notice");
@@ -1449,77 +1535,127 @@ mod tests {
         assert!(parse(&[overmark_win::grabber::ARG]).grabber);
     }
 
-    fn shortcuts(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    use overmark_core::hotkey::Hotkey;
+
+    fn hotkeys(list: &[(&str, &str)]) -> Vec<(String, Hotkey)> {
         list.iter()
-            .map(|(a, h)| ((*a).to_owned(), (*h).to_owned()))
+            .map(|(a, h)| ((*a).to_owned(), Hotkey::parse(h).unwrap().unwrap()))
             .collect()
     }
 
-    /// Idle: the name, then each registered hotkey on its own line, as the menu names them.
+    const IDLE: super::TipState = super::TipState {
+        drawing: None,
+        recording: false,
+    };
+
+    /// Idle: the name, then the hotkeys, those sharing their modifiers on one line.
     #[test]
-    fn the_tooltip_lists_the_hotkeys() {
+    fn the_tooltip_groups_the_hotkeys_by_their_modifiers() {
         overmark_core::i18n::init("en");
-        let all = shortcuts(&[
+        let all = hotkeys(&[
             ("Draw", "Win+Shift+D"),
-            ("Draw on a frozen screen", "Win+Shift+F"),
+            ("Frozen", "Win+Shift+F"),
             ("Whiteboard", "Ctrl+Shift+W"),
+            ("Capture", "Win+Shift+X"),
         ]);
         assert_eq!(
-            super::tooltip_text(None, &all),
-            "Overmark\nDraw: Win+Shift+D\nDraw on a frozen screen: Win+Shift+F\n\
-             Whiteboard: Ctrl+Shift+W"
+            super::tooltip_text(IDLE, &all),
+            "Overmark\nWin+Shift: D Draw · F Frozen · X Capture\nCtrl+Shift: W Whiteboard"
         );
         // One that isn't set or couldn't be registered isn't in the list, so isn't shown.
-        let one = shortcuts(&[("Draw on a frozen screen", "Win+Shift+F")]);
+        let one = hotkeys(&[("Frozen", "Win+Shift+F")]);
         assert_eq!(
-            super::tooltip_text(None, &one),
-            "Overmark\nDraw on a frozen screen: Win+Shift+F"
+            super::tooltip_text(IDLE, &one),
+            "Overmark\nWin+Shift: F Frozen"
         );
-        assert_eq!(super::tooltip_text(None, &[]), "Overmark: click to draw");
+        assert_eq!(super::tooltip_text(IDLE, &[]), "Overmark: click to draw");
+        // A key with no modifiers (Print Screen) stands alone.
+        let alone = hotkeys(&[("Draw", "PrintScreen")]);
+        let text = super::tooltip_text(IDLE, &alone);
+        assert!(
+            text.starts_with("Overmark\n") && text.ends_with(" Draw"),
+            "{text}"
+        );
+        assert!(!text.contains(':'), "{text}");
     }
 
-    /// Capture a region's line names it without the menu's "…", and every default hotkey's
-    /// line fits whole, with room for a board's.
+    /// Every default hotkey, with both boards' too, fits whole, drawing on a board included:
+    /// the tooltip was tidied so none is left out.
     #[test]
-    fn the_tooltip_lists_capture_a_region() {
+    fn every_default_hotkey_and_both_boards_fit() {
         use overmark_core::settings::GeneralSettings;
         use overmark_win::hotkeys::Action;
-        overmark_core::i18n::init("en");
-        let g = GeneralSettings::default();
-        let all: Vec<(String, String)> = [
-            (Action::Draw, &g.hotkey_draw),
-            (Action::DrawFrozen, &g.hotkey_draw_frozen),
-            (Action::CaptureRegion, &g.hotkey_capture_region),
-            (Action::DrawWhiteboard, &"Ctrl+Shift+W".to_owned()),
-        ]
-        .into_iter()
-        .map(|(a, h)| (super::action_name(a), h.clone()))
-        .collect();
-        let text = super::tooltip_text(None, &all);
-        assert_eq!(
-            text,
-            format!(
-                "Overmark\nDraw: Win+Shift+D\nDraw on a frozen screen: Win+Shift+F\n\
-                 Capture a region: {}\nWhiteboard: Ctrl+Shift+W",
-                g.hotkey_capture_region
-            )
-        );
-        assert!(text.encode_utf16().count() <= super::TOOLTIP_MAX);
-    }
-
-    /// Drawing: the state first, the hotkeys under it.
-    #[test]
-    fn the_tooltip_says_its_drawing_then_the_hotkeys() {
         use overmark_win::overlay::Backdrop;
         overmark_core::i18n::init("en");
-        let one = shortcuts(&[("Draw", "Win+Shift+D")]);
+        let g = GeneralSettings::default();
+        let all: Vec<(String, Hotkey)> = [
+            (Action::Draw, g.hotkey_draw.as_str()),
+            (Action::DrawFrozen, g.hotkey_draw_frozen.as_str()),
+            (Action::CaptureRegion, g.hotkey_capture_region.as_str()),
+            (Action::RecordRegion, g.hotkey_record_region.as_str()),
+            (Action::DrawWhiteboard, "Win+Shift+W"),
+            (Action::DrawBlackboard, "Win+Shift+K"),
+        ]
+        .into_iter()
+        .map(|(a, h)| (super::tooltip_name(a), Hotkey::parse(h).unwrap().unwrap()))
+        .collect();
+        let idle = super::tooltip_text(IDLE, &all[..4]);
         assert_eq!(
-            super::tooltip_text(Some(Backdrop::Frozen), &one),
-            "Overmark: drawing (Frozen)\nDraw: Win+Shift+D"
+            idle,
+            "Overmark\nWin+Shift: D Draw · F Frozen · X Capture\nWin+Alt: V Record"
         );
+        for state in [
+            IDLE,
+            super::TipState {
+                drawing: Some(Backdrop::Whiteboard),
+                recording: false,
+            },
+            super::TipState {
+                drawing: Some(Backdrop::Blackboard),
+                recording: true,
+            },
+        ] {
+            let text = super::tooltip_text(state, &all);
+            assert!(text.encode_utf16().count() <= super::TOOLTIP_MAX, "{text}");
+            for name in [
+                "Draw",
+                "Frozen",
+                "Capture",
+                "Record",
+                "Whiteboard",
+                "Blackboard",
+            ] {
+                assert!(text.contains(name), "{name} left out of {text:?}");
+            }
+        }
+    }
+
+    /// Drawing, or recording: the state first, the hotkeys under it.
+    #[test]
+    fn the_tooltip_says_its_drawing_or_recording_then_the_hotkeys() {
+        use overmark_win::overlay::Backdrop;
+        overmark_core::i18n::init("en");
+        let one = hotkeys(&[("Draw", "Win+Shift+D")]);
+        let frozen = super::TipState {
+            drawing: Some(Backdrop::Frozen),
+            recording: false,
+        };
         assert_eq!(
-            super::tooltip_text(Some(Backdrop::Live), &[]),
-            "Overmark: drawing (Live)"
+            super::tooltip_text(frozen, &one),
+            "Overmark: drawing (Frozen)\nWin+Shift: D Draw"
+        );
+        let live = super::TipState {
+            drawing: Some(Backdrop::Live),
+            recording: false,
+        };
+        assert_eq!(super::tooltip_text(live, &[]), "Overmark: drawing (Live)");
+        let recording = super::TipState {
+            drawing: None,
+            recording: true,
+        };
+        assert_eq!(
+            super::tooltip_text(recording, &one),
+            "Overmark: recording\nWin+Shift: D Draw"
         );
     }
 
@@ -1528,18 +1664,18 @@ mod tests {
     #[test]
     fn a_long_tooltip_drops_whole_lines() {
         overmark_core::i18n::init("en");
-        let long = "Dessiner sur un écran figé, avec la souris, le stylet ou le doigt";
-        let list = shortcuts(&[
-            ("Dessiner", "Win+Maj+D"),
-            (long, "Win+Maj+F"),
-            ("Tableau blanc", "Ctrl+Maj+W"),
+        let long = "Dessiner sur un écran figé, avec la souris, le stylet ou le doigt, partout";
+        let list = hotkeys(&[
+            ("Dessiner", "Win+Shift+D"),
+            (long, "Win+Alt+F"),
+            ("Tableau blanc", "Ctrl+Shift+W"),
         ]);
-        let text = super::tooltip_text(None, &list);
+        let text = super::tooltip_text(IDLE, &list);
         assert!(text.encode_utf16().count() <= super::TOOLTIP_MAX, "{text}");
         assert_eq!(
             text,
-            format!("Overmark\nDessiner: Win+Maj+D\n{long}: Win+Maj+F"),
-            "the third line doesn't fit, so it's left out"
+            format!("Overmark\nWin+Shift: D Dessiner\nWin+Alt: F {long}"),
+            "the third group doesn't fit, so it's left out"
         );
         // Lines that fit all show; once one doesn't, none after it does, so the order holds.
         let fit = |first: &str, lines: Vec<String>| {

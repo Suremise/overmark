@@ -22,3 +22,5 @@ toast-open-failed = { $file } couldn't be opened: { $reason }
 
 toast-recording-saved = Recording saved to { $file }
 toast-recording-failed = The recording couldn't be made: { $reason }
+# Record a region (the tray's item or its hotkey) while the drawing layer is open.
+toast-record-layer-open = Close the drawing layer to record the screen. To record with your drawing, use Record on its toolbar.

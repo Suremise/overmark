@@ -62,6 +62,9 @@ pub struct GeneralSettings {
     pub hotkey_draw_frozen: String,
     /// The hotkey that captures a region, as the tray's "Capture a region…" does. Empty: none.
     pub hotkey_capture_region: String,
+    /// The hotkey that records a region of the screen, as the tray's "Record a region…" does;
+    /// pressed again, it stops and saves. Empty: none.
+    pub hotkey_record_region: String,
     /// What Print Screen does, if anything.
     pub print_screen: PrintScreen,
 }
@@ -69,6 +72,11 @@ pub struct GeneralSettings {
 /// Capture a region's hotkey unless it's changed: not one Windows 10 or 11 uses (Win+Shift+S is
 /// the Snipping Tool's), and no Ctrl+Alt, which is AltGr on many keyboards.
 pub const DEFAULT_CAPTURE_REGION_HOTKEY: &str = "Win+Shift+X";
+
+/// Record a region's hotkey unless it's changed: V for video, beside Windows' own Win+Alt+R
+/// (the Game Bar's recording). Free on Windows 11 when it was chosen (probed with every
+/// Win+Shift and Win+Alt letter: Win+Shift+R and V are Windows').
+pub const DEFAULT_RECORD_REGION_HOTKEY: &str = "Win+Alt+V";
 
 impl Default for GeneralSettings {
     fn default() -> Self {
@@ -78,6 +86,7 @@ impl Default for GeneralSettings {
             hotkey_draw: "Win+Shift+D".to_owned(),
             hotkey_draw_frozen: "Win+Shift+F".to_owned(),
             hotkey_capture_region: DEFAULT_CAPTURE_REGION_HOTKEY.to_owned(),
+            hotkey_record_region: DEFAULT_RECORD_REGION_HOTKEY.to_owned(),
             print_screen: PrintScreen::Off,
         }
     }
@@ -803,6 +812,13 @@ impl Settings {
             ),
             "hotkey_capture_region",
             &str_value(&g.hotkey_capture_region),
+        );
+        w.key(
+            &format!(
+                "The hotkey that records a region of the screen to a video, as the tray's Record a\nregion… does; pressed again, it stops and saves (default \"{DEFAULT_RECORD_REGION_HOTKEY}\"). \"\" turns it off."
+            ),
+            "hotkey_record_region",
+            &str_value(&g.hotkey_record_region),
         );
         w.key(
             "What Print Screen does: \"off\" (Windows keeps it; the default), \"live\" or \"frozen\". Windows 11\nsends Print Screen to the Snipping Tool unless you turn that off in its Settings.",

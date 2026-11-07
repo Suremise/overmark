@@ -15,6 +15,7 @@ fn changed() -> Settings {
     s.general.hotkey_draw = "Ctrl+Shift+D".into();
     s.general.hotkey_draw_frozen = String::new();
     s.general.hotkey_capture_region = "Ctrl+Shift+R".into();
+    s.general.hotkey_record_region = "Ctrl+Shift+V".into();
     s.general.print_screen = PrintScreen::Frozen;
     s.drawing.default_tool = ToolKind::Highlighter;
     s.drawing.palette[8] = Colour {

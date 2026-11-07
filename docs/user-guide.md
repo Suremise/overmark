@@ -186,6 +186,32 @@ Windows' own otherwise; **Software** always uses Windows' own, which makes small
 still screen and works the processor harder. A minute of a small, mostly still box (Task Manager,
 say) is under a megabyte or two.
 
+### Recording without drawing
+
+To record an app while you use it (Task Manager's graphs, say), with no drawing layer: **Record a
+region…** in the tray's menu, or its hotkey **Win+Alt+V** from anywhere.
+
+1. Drag a box over the screen, as above (**Esc** cancels). Then you're back in the app you were
+   using: the box and its bar sit over it, and your clicks and keys go to your apps as usual,
+   including inside the box.
+2. **Record** on the bar starts; **Pause**, **Resume**, **Stop** and **✕** work as above.
+   Clicking the bar never takes the keyboard from your app.
+3. **Win+Alt+V again stops and saves** (Esc can't reach the bar, as it never has the keyboard).
+   Before you've started, it closes the box.
+
+The bar stays on top of your windows: if another always-on-top window (Task Manager's, say)
+covers it, it comes back over it within half a second. Windows' own Start menu, its flyouts,
+Win+Tab, a permission prompt and the lock screen still go above it while they're open; a
+permission prompt and locking the PC end the recording and save it. Opening the drawing layer
+while a screen recording runs leaves the recording alone. With the drawing layer open,
+Win+Alt+V only says to close it first (or to use Record on its toolbar, to record with your
+drawing); your drawing stays as it is. Pressed while you're choosing the box, it stops
+choosing.
+
+The hotkey can be changed or turned off in Settings (General, Hotkeys), as the others can.
+Turning off "Show a notice after each capture" also hides the notice after a recording is saved;
+a problem (a recording that couldn't start, or stopped by itself) is always told.
+
 On Windows N editions recording needs the Media Feature Pack (Settings › Apps › Optional
 features); without it, Overmark says so when you press Record.
 
@@ -243,8 +269,9 @@ Overmark's icon in the notification area shows its state: an outlined nib when i
 filled nib with an amber dot while you draw Live, and with a pause badge while you draw Frozen.
 It follows the taskbar's light or dark theme. If it's hidden, Windows' **^** arrow beside the
 clock shows it; drag it onto the taskbar to keep it there. Hover over it to see Overmark's
-hotkeys, each with what it does (only those that work: one another app has is left out), and,
-while you draw, whether it's Live, Frozen or a board.
+hotkeys, those with the same modifiers on one line ("Win+Shift: D Draw · F Frozen · X Capture"),
+only those that work (one another app has is left out), and, while you draw or record, that you
+are.
 
 - **Click** it to draw. Settings chooses what a click does: draw Live (the default), draw on a
   frozen screen, or open Settings.
@@ -256,6 +283,7 @@ while you draw, whether it's Live, Frozen or a board.
   | **Draw** | Opens the layer Live (its hotkey beside it) |
   | **Draw on a frozen screen** | Opens it Frozen |
   | **Capture a region…** | Freezes the screen and lets you choose a region to capture (its hotkey beside it) |
+  | **Record a region…** | Lets you choose a box and record it to a video while you use your apps (its hotkey beside it); see [Recording without drawing](#recording-without-drawing) |
   | **Open captures folder** | Opens the folder captures go to |
   | **Settings…** | Opens Settings |
   | **Start with Windows** | Ticked when Overmark starts as you sign in; click to change it |

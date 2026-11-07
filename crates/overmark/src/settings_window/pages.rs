@@ -36,15 +36,17 @@ pub enum Slot {
     Draw,
     DrawFrozen,
     CaptureRegion,
+    RecordRegion,
     Whiteboard,
     Blackboard,
 }
 
 impl Slot {
-    pub const ALL: [Slot; 5] = [
+    pub const ALL: [Slot; 6] = [
         Slot::Draw,
         Slot::DrawFrozen,
         Slot::CaptureRegion,
+        Slot::RecordRegion,
         Slot::Whiteboard,
         Slot::Blackboard,
     ];
@@ -55,6 +57,7 @@ impl Slot {
             Slot::Draw => "general.hotkey_draw",
             Slot::DrawFrozen => "general.hotkey_draw_frozen",
             Slot::CaptureRegion => "general.hotkey_capture_region",
+            Slot::RecordRegion => "general.hotkey_record_region",
             Slot::Whiteboard => "backdrops.hotkey_whiteboard",
             Slot::Blackboard => "backdrops.hotkey_blackboard",
         }
@@ -65,6 +68,7 @@ impl Slot {
             Slot::Draw => "settings-hotkey-draw",
             Slot::DrawFrozen => "settings-hotkey-draw-frozen",
             Slot::CaptureRegion => "settings-hotkey-capture-region",
+            Slot::RecordRegion => "settings-hotkey-record-region",
             Slot::Whiteboard => "settings-hotkey-whiteboard",
             Slot::Blackboard => "settings-hotkey-blackboard",
         })
@@ -75,6 +79,7 @@ impl Slot {
             Slot::Draw => &s.general.hotkey_draw,
             Slot::DrawFrozen => &s.general.hotkey_draw_frozen,
             Slot::CaptureRegion => &s.general.hotkey_capture_region,
+            Slot::RecordRegion => &s.general.hotkey_record_region,
             Slot::Whiteboard => &s.backdrops.hotkey_whiteboard,
             Slot::Blackboard => &s.backdrops.hotkey_blackboard,
         }
@@ -85,6 +90,7 @@ impl Slot {
             Slot::Draw => &mut s.general.hotkey_draw,
             Slot::DrawFrozen => &mut s.general.hotkey_draw_frozen,
             Slot::CaptureRegion => &mut s.general.hotkey_capture_region,
+            Slot::RecordRegion => &mut s.general.hotkey_record_region,
             Slot::Whiteboard => &mut s.backdrops.hotkey_whiteboard,
             Slot::Blackboard => &mut s.backdrops.hotkey_blackboard,
         }

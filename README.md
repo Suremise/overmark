@@ -44,6 +44,7 @@ layer, and the drawing goes with it: each time starts clean.
 | **Win+Shift+D** | Draw (Live) |
 | **Win+Shift+F** | Draw on a frozen screen |
 | **Win+Shift+X** | Capture a region |
+| **Win+Alt+V** | Record a region of the screen (press again to stop and save) |
 | **F** | Freeze or unfreeze |
 | **W**, **Shift+W** | The next or previous backdrop: Live, Frozen, whiteboard, blackboard |
 | **G**, **Shift+G** | The next or previous guides: none, grid, dots, ruled lines |
@@ -57,7 +58,9 @@ layer, and the drawing goes with it: each time starts clean.
 | **Esc** | Close the layer |
 
 **Record** on the toolbar records a box of the screen to a small MP4, with your drawing in it:
-drag the box, then use the bar on its edge to record, pause, stop (which saves) or discard. The
+drag the box, then use the bar on its edge to record, pause, stop (which saves) or discard. Or
+record without drawing: **Record a region…** in the tray menu, or **Win+Alt+V**, puts the same
+box and bar over your apps, which you go on using; press the hotkey again to stop and save. The
 bar and the box's outline are never in the video, and there's no sound.
 
 The hotkeys can be changed in Settings. Overmark never uses a keyboard or mouse hook: global

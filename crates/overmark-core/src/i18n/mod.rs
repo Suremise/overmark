@@ -9,7 +9,7 @@
 //!
 //! i18n::init("en-GB");
 //! assert_eq!(i18n::tr("tray-draw"), "Draw");
-//! assert_eq!(tr!("tray-tooltip-shortcut", action = "Draw", hotkey = "Win+Shift+D"), "Draw: Win+Shift+D");
+//! assert_eq!(tr!("tray-tooltip-key", key = "D", action = "Draw"), "D Draw");
 //! ```
 //!
 //! A key that is missing in every language, or a message that fails to format, is logged with
@@ -336,14 +336,14 @@ mod tests {
     #[test]
     fn the_macro_takes_text_and_numbers() {
         assert_eq!(crate::tr!("tray-quit"), "Quit");
-        let hotkey = String::from("Win+Shift+D");
+        let modifiers = String::from("Win+Shift");
         assert_eq!(
             crate::tr!(
-                "tray-tooltip-shortcut",
-                action = "Draw",
-                hotkey = hotkey.as_str()
+                "tray-tooltip-group",
+                modifiers = modifiers.as_str(),
+                keys = "D Draw"
             ),
-            "Draw: Win+Shift+D"
+            "Win+Shift: D Draw"
         );
         assert_eq!(crate::tr!("settings-seconds", seconds = 2), "2 seconds");
     }

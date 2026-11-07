@@ -1,19 +1,31 @@
 # The tray icon: its tooltip and its right-click menu.
 
-## Tooltip: Overmark's name (app-name) or what it's doing on the first line, then a line for
-## each hotkey that works. A tooltip holds 127 characters: lines that don't fit are left out
-## from the end, so keep these short.
+## Tooltip: Overmark's name (app-name) or what it's doing on the first line, then the hotkeys
+## that work, those sharing their modifiers on one line ("Win+Shift: D Draw · F Frozen"). A
+## tooltip holds 127 characters: lines that don't fit are left out from the end, so keep these
+## short.
 
-# One of the hotkeys, under the name. $action: what it does, as the menu names it (tray-draw,
-# tray-draw-frozen, tray-tooltip-capture-region, or a board's name); $hotkey: its keys
-# ("Win+Shift+D").
-tray-tooltip-shortcut = { $action }: { $hotkey }
+# A line of hotkeys sharing their modifiers. $modifiers: the keys held ("Win+Shift"); $keys:
+# each hotkey's tray-tooltip-key, joined by tray-tooltip-separator.
+tray-tooltip-group = { $modifiers }: { $keys }
+# One hotkey on its line. $key: its last key ("D"); $action: its short name below.
+tray-tooltip-key = { $key } { $action }
+tray-tooltip-separator = {" · "}
+# The actions' short names, for the tooltip only (the menu has the full ones).
+tray-tooltip-draw = Draw
+tray-tooltip-draw-frozen = Frozen
+tray-tooltip-capture = Capture
+tray-tooltip-record = Record
 tray-tooltip-live = Overmark: drawing (Live)
 tray-tooltip-frozen = Overmark: drawing (Frozen)
 # Drawing on a whiteboard or blackboard; $backdrop is its name (backdrop-whiteboard, ...).
 tray-tooltip-board = Overmark: drawing ({ $backdrop })
-# Capture a region's hotkey, as the tooltip names it (the menu's item without its "…").
+# A video is being recorded.
+tray-tooltip-recording = Overmark: recording
+# Capture a region, as a hotkey notice names it (the menu's item without its "…").
 tray-tooltip-capture-region = Capture a region
+# Record a region, as a hotkey notice names it.
+tray-action-record-region = Record a region
 # When no hotkey could be registered, or there are none.
 tray-tooltip-no-hotkey = Overmark: click to draw
 
@@ -22,6 +34,7 @@ tray-tooltip-no-hotkey = Overmark: click to draw
 tray-draw = Draw
 tray-draw-frozen = Draw on a frozen screen
 tray-capture-region = Capture a region…
+tray-record-region = Record a region…
 tray-open-captures = Open captures folder
 tray-settings = Settings…
 tray-start-with-windows = Start with Windows

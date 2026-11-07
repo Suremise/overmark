@@ -286,3 +286,21 @@ fn the_timer_reads_minutes_and_seconds_then_hours() {
     assert_eq!(t(3_599_999), "59:59");
     assert_eq!(t(3_723_000), "1:02:03");
 }
+
+#[test]
+fn the_bar_goes_back_on_top_at_once_then_every_half_second() {
+    let mut r = Reassert::new(REASSERT_MS);
+    assert_eq!(r.wait_ms(1_000), 0);
+    assert!(r.due(1_000), "at once");
+    assert!(!r.due(1_000));
+    assert!(!r.due(1_499));
+    assert_eq!(r.wait_ms(1_200), 300);
+    assert!(r.due(1_500));
+    // Counted from when it was done, not when it was due: a late turn doesn't bunch them up.
+    assert!(r.due(2_700));
+    assert!(!r.due(3_100));
+    assert_eq!(r.wait_ms(3_100), 100);
+    // A clock that went back (another thread's reading) waits a whole period, never panics.
+    assert!(!r.due(2_000));
+    assert_eq!(r.wait_ms(10_000), 0);
+}
