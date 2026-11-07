@@ -65,3 +65,5 @@ key-down = Down
 
 window-selection-name = Overmark selection
 window-notice-name = Overmark notice
+window-record-outline-name = Overmark recording outline
+window-record-bar-name = Overmark recording controls

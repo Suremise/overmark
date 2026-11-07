@@ -1007,6 +1007,85 @@ fn capture(app: &mut SettingsApp, ui: &mut Ui) {
             toggle(ui, &mut c.toast)
         });
     });
+    ui.add_space(space::M);
+    recording(app, ui);
+}
+
+/// Recording, on the Capture page: the video's frame rate, quality, pointer and encoder. Videos
+/// go in the save folder above, named by the pattern above.
+fn recording(app: &mut SettingsApp, ui: &mut Ui) {
+    use overmark_core::record::{Encoder, FrameRate, Quality};
+    let r = &mut app.settings.recording;
+    section_card(
+        ui,
+        &tr("settings-recording"),
+        Some(&tr("settings-recording-description")),
+        |ui| {
+            let rates = FrameRate::ALL;
+            let names: Vec<String> = rates
+                .iter()
+                .map(|f| tr!("settings-recording-fps", fps = f.fps()))
+                .collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            let i = rates.iter().position(|f| *f == r.frame_rate()).unwrap_or(0);
+            let mut chosen = None;
+            setting_row(ui, &tr("settings-recording-frame-rate"), None, |ui| {
+                let (resp, clicked) = segmented(ui, &names, i);
+                chosen = clicked;
+                resp
+            });
+            if let Some(n) = chosen {
+                r.frame_rate = rates[n].fps();
+            }
+
+            let qualities = Quality::ALL;
+            let names = [
+                tr("settings-recording-quality-small"),
+                tr("settings-recording-quality-balanced"),
+                tr("settings-recording-quality-sharp"),
+            ];
+            let i = qualities.iter().position(|q| *q == r.quality).unwrap_or(1);
+            let mut chosen = None;
+            setting_row(
+                ui,
+                &tr("settings-recording-quality"),
+                Some(&tr("settings-recording-quality-description")),
+                |ui| {
+                    let (resp, clicked) = segmented(ui, &[&names[0], &names[1], &names[2]], i);
+                    chosen = clicked;
+                    resp
+                },
+            );
+            if let Some(n) = chosen {
+                r.quality = qualities[n];
+            }
+
+            setting_row(ui, &tr("settings-recording-pointer"), None, |ui| {
+                toggle(ui, &mut r.pointer)
+            });
+
+            let encoders = [Encoder::Automatic, Encoder::Software];
+            let names = [
+                tr("settings-recording-encoder-automatic"),
+                tr("settings-recording-encoder-software"),
+            ];
+            let i = encoders.iter().position(|e| *e == r.encoder).unwrap_or(0);
+            let mut chosen = None;
+            setting_row(
+                ui,
+                &tr("settings-recording-encoder"),
+                Some(&tr("settings-recording-encoder-description")),
+                |ui| {
+                    let (resp, clicked) = segmented(ui, &[&names[0], &names[1]], i);
+                    chosen = clicked;
+                    resp
+                },
+            );
+            if let Some(n) = chosen {
+                r.encoder = encoders[n];
+            }
+        },
+    );
 }
 
 /// The setting for a folder picked: `{pictures}\…` when it's in Pictures, so it follows a

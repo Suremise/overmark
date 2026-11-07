@@ -602,22 +602,53 @@ pub fn decode_frame_at(path: &Path, at: i64) -> Result<(u32, u32, Vec<u8>), MfEr
             }
         }
         let sample = last.ok_or_else(|| windows::core::Error::new(E_FAIL, "no frames"))?;
-        let buffer = sample.ConvertToContiguousBuffer()?;
-        let mut data = std::ptr::null_mut();
-        let mut len = 0u32;
-        buffer.Lock(&mut data, None, Some(&mut len))?;
+        // The sample's own buffer is a 2-D one that knows its pitch; a contiguous copy isn't.
+        let buffer = match sample.GetBufferCount() {
+            Ok(1) => sample.GetBufferByIndex(0)?,
+            _ => sample.ConvertToContiguousBuffer()?,
+        };
         let row = w as usize * 4;
         let mut out = Vec::with_capacity(row * h as usize);
-        for y in 0..h as usize {
-            // A negative stride is a bottom-up image: its first row in memory is the last.
-            let src_row = if stride < 0 { h as usize - 1 - y } else { y };
-            let start = src_row * stride.unsigned_abs() as usize;
-            if start + row > len as usize {
-                break;
+        // The decoder pads its rows (a width that isn't a multiple of 16): a 2-D buffer says
+        // its real pitch, negative for a bottom-up image; otherwise the media type's stride.
+        if let Ok(two_d) = buffer.cast::<IMF2DBuffer>() {
+            let mut scan0 = std::ptr::null_mut();
+            let mut pitch = 0i32;
+            two_d.Lock2D(&mut scan0, &mut pitch)?;
+            for y in 0..h as isize {
+                let start = scan0.offset(y * pitch as isize);
+                out.extend_from_slice(std::slice::from_raw_parts(start, row));
             }
-            out.extend_from_slice(std::slice::from_raw_parts(data.add(start), row));
+            two_d.Unlock2D()?;
+        } else {
+            let mut data = std::ptr::null_mut();
+            let mut len = 0u32;
+            buffer.Lock(&mut data, None, Some(&mut len))?;
+            // Without a pitch: the decoder pads its frame to whole 16-pixel blocks (680 x 162
+            // comes as 688 x 176), so a row is the width rounded up to 16 when the buffer is
+            // that big (measured on Windows 11's H.264 decoder and video processor).
+            let padded = (w as usize).div_ceil(16) * 16 * 4;
+            let stride =
+                if stride.unsigned_abs() as usize == row && len as usize >= padded * h as usize {
+                    if stride < 0 {
+                        -(padded as i32)
+                    } else {
+                        padded as i32
+                    }
+                } else {
+                    stride
+                };
+            for y in 0..h as usize {
+                // A negative stride is a bottom-up image: its first row in memory is the last.
+                let src_row = if stride < 0 { h as usize - 1 - y } else { y };
+                let start = src_row * stride.unsigned_abs() as usize;
+                if start + row > len as usize {
+                    break;
+                }
+                out.extend_from_slice(std::slice::from_raw_parts(data.add(start), row));
+            }
+            buffer.Unlock()?;
         }
-        buffer.Unlock()?;
         Ok((w, h, out))
     }
 }

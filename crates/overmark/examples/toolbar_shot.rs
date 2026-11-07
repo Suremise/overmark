@@ -36,6 +36,7 @@ fn main() {
         collapsed: false,
         disappearing_ink: false,
         right_click_undoes: true,
+        recording: false,
     };
     let frozen = State {
         backdrop: Backdrop::Frozen,

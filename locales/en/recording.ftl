@@ -14,3 +14,23 @@ record-error-capture-lost = The recording stopped because the screen couldn't be
 record-error-encoding = The video couldn't be encoded: { $reason }
 # $path: the video's file.
 record-error-file = The video { $path } couldn't be written: { $reason }
+
+## The control bar on the box's top edge
+
+record-bar-record = Record
+record-bar-record-tooltip = Start recording what's in the box
+record-bar-pause = Pause
+record-bar-pause-tooltip = Pause: nothing is recorded until you resume, and the video has no gap
+record-bar-resume = Resume
+record-bar-resume-tooltip = Go on recording
+record-bar-stop = Stop
+record-bar-stop-tooltip = Stop and save the video
+record-bar-cancel = Cancel
+record-bar-cancel-tooltip = Close the box without recording (Esc)
+record-bar-discard = Discard
+record-bar-discard-tooltip = Throw this recording away
+record-bar-discard-question = Discard this recording?
+record-bar-discard-confirm = Discard
+record-bar-keep = Keep
+# What a screen reader reads for the timer. $time: as the timer shows it ("1:05").
+record-bar-elapsed = Recorded { $time }

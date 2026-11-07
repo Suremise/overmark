@@ -45,6 +45,10 @@ fn changed() -> Settings {
     s.capture.jpg_quality = 75;
     s.capture.include_drawing = false;
     s.capture.toast = false;
+    s.recording.frame_rate = 30;
+    s.recording.quality = crate::record::Quality::Sharp;
+    s.recording.pointer = false;
+    s.recording.encoder = crate::record::Encoder::Software;
     s.advanced.check_for_updates = true;
     s.advanced.diagnostic_logging = true;
     s.backdrops.whiteboard_colour = Colour::rgb(250, 248, 240);
@@ -589,4 +593,35 @@ fn every_released_versions_settings_load_and_keep_their_values() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn recording_defaults_and_a_rate_out_of_range() {
+    use crate::record::{Encoder, FrameRate, Quality};
+    let d = Settings::default().recording;
+    assert_eq!(
+        (d.frame_rate, d.quality, d.pointer, d.encoder),
+        (15, Quality::Balanced, true, Encoder::Automatic)
+    );
+    assert_eq!(d.frame_rate(), FrameRate::Fps15);
+    let loaded = Settings::parse(
+        "[recording]\nframe_rate = 25\nquality = \"small\"\npointer = false\nencoder = \"software\"\n",
+    )
+    .unwrap();
+    let r = &loaded.settings.recording;
+    assert_eq!(
+        (r.frame_rate, r.quality, r.pointer, r.encoder),
+        (24, Quality::Small, false, Encoder::Software)
+    );
+    assert_eq!(
+        loaded.warnings,
+        [Warning::OutOfRange {
+            key: "recording.frame_rate".into(),
+            value: "25".into(),
+            used: "24".into(),
+        }]
+    );
+    assert_eq!(r.record_settings().frame_rate, FrameRate::Fps24);
+    // A quality or an encoder it doesn't know is a clear error, as other enums are.
+    assert!(Settings::parse("[recording]\nquality = \"huge\"\n").is_err());
 }

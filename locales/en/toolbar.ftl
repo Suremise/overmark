@@ -104,3 +104,9 @@ toolbar-guides-tooltip = Guides: { $next } for the next, { $previous } for the o
 region-hint = Drag to select a region. { key-esc } cancels.
 # $width, $height: the selection's size in pixels.
 region-size = { $width } × { $height }
+
+## Recording
+
+toolbar-record = Record
+toolbar-record-tooltip = Record a video of part of the screen, with your drawing: drag a box, then press Record on the bar above it
+toolbar-record-busy-tooltip = A recording's box is open: use the bar on its edge

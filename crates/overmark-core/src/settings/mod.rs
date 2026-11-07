@@ -41,6 +41,7 @@ pub struct Settings {
     pub general: GeneralSettings,
     pub drawing: DrawingSettings,
     pub capture: CaptureSettings,
+    pub recording: RecordingSettings,
     pub advanced: AdvancedSettings,
     pub backdrops: BackdropSettings,
     pub guides: GuideSettings,
@@ -351,6 +352,46 @@ impl ImageFormat {
         match self {
             ImageFormat::Png => "png",
             ImageFormat::Jpg => "jpg",
+        }
+    }
+}
+
+/// Settings, Capture: recording a box of the screen to an MP4 (in the captures folder, named
+/// by the capture file-name pattern).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecordingSettings {
+    /// Frames a second: 15, 24 or 30 (anything else is taken to the nearest).
+    pub frame_rate: u32,
+    pub quality: crate::record::Quality,
+    /// Whether the mouse pointer is drawn into the video.
+    pub pointer: bool,
+    pub encoder: crate::record::Encoder,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        RecordingSettings {
+            frame_rate: crate::record::FrameRate::default().fps(),
+            quality: crate::record::Quality::default(),
+            pointer: true,
+            encoder: crate::record::Encoder::default(),
+        }
+    }
+}
+
+impl RecordingSettings {
+    /// The frame rate as the recorder takes it.
+    pub fn frame_rate(&self) -> crate::record::FrameRate {
+        crate::record::FrameRate::nearest(self.frame_rate)
+    }
+
+    /// What a recording is made with.
+    pub fn record_settings(&self) -> crate::record::RecordSettings {
+        crate::record::RecordSettings {
+            frame_rate: self.frame_rate(),
+            quality: self.quality,
+            pointer: self.pointer,
         }
     }
 }
@@ -685,6 +726,16 @@ impl Settings {
             self.guides.spacing.into(),
             GuideSettings::SPACING_RANGE,
         ) as u32;
+        let r = &mut self.recording;
+        let rate = crate::record::FrameRate::nearest(r.frame_rate).fps();
+        if rate != r.frame_rate {
+            warnings.push(Warning::OutOfRange {
+                key: "recording.frame_rate".to_owned(),
+                value: r.frame_rate.to_string(),
+                used: rate.to_string(),
+            });
+            r.frame_rate = rate;
+        }
 
         for (key, colour) in [
             (
@@ -891,6 +942,31 @@ button only: a pen's barrel button and touch never undo.",
             "Show a small notice after each capture saying where it went (default true).",
             "toast",
             &c.toast.to_string(),
+        );
+
+        let r = &self.recording;
+        w.blank();
+        w.comment("Recording a box of the screen to an MP4 video, saved in the captures folder.");
+        w.table("[recording]");
+        w.key(
+            "Frames a second: 15 (the default), 24 or 30.",
+            "frame_rate",
+            &r.frame_rate.to_string(),
+        );
+        w.key(
+            "\"small\", \"balanced\" (the default) or \"sharp\": how much a busy video may take. A still\nscreen costs little at any of them.",
+            "quality",
+            &enum_value(&r.quality),
+        );
+        w.key(
+            "Show the mouse pointer in the video (default true).",
+            "pointer",
+            &r.pointer.to_string(),
+        );
+        w.key(
+            "\"automatic\" (the default: the graphics card's encoder when it can take the video,\notherwise Windows' software one) or \"software\" (Windows' own: smaller files of a still screen,\nmore work for the processor).",
+            "encoder",
+            &enum_value(&r.encoder),
         );
 
         w.blank();

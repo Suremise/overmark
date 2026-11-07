@@ -20,6 +20,10 @@ pub enum Glyph {
     Pause,
     /// A triangle pointing right: let the screen move again.
     Play,
+    /// A dot in a ring: record a video.
+    Record,
+    /// A square: stop recording.
+    Stop,
     /// An arrow curving back to the left.
     Undo,
     /// An arrow curving on to the right.
@@ -176,6 +180,17 @@ impl Glyph {
                     vec![at(0.3, 0.18), at(0.82, 0.5), at(0.3, 0.82)],
                     stroke,
                 ));
+            }
+            Glyph::Record => {
+                painter.circle_stroke(at(0.5, 0.5), side * 0.42, stroke);
+                painter.circle_filled(at(0.5, 0.5), side * 0.24, colour);
+            }
+            Glyph::Stop => {
+                painter.rect_filled(
+                    Rect::from_min_max(at(0.24, 0.24), at(0.76, 0.76)),
+                    side * 0.06,
+                    colour,
+                );
             }
             Glyph::Undo | Glyph::Redo => {
                 let flip = |x: f32| if self == Glyph::Undo { x } else { 1.0 - x };

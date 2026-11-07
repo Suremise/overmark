@@ -145,6 +145,25 @@ impl FrameRate {
             FrameRate::Fps30 => 30,
         }
     }
+
+    /// The rate nearest `fps` (the lower of two as near).
+    pub fn nearest(fps: u32) -> FrameRate {
+        FrameRate::ALL
+            .into_iter()
+            .min_by_key(|r| r.fps().abs_diff(fps))
+            .unwrap_or_default()
+    }
+}
+
+/// Which H.264 encoder records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Encoder {
+    /// The graphics card's when it takes the video, otherwise Windows' software one.
+    #[default]
+    Automatic,
+    /// Windows' software encoder only.
+    Software,
 }
 
 /// How sharp the video is, against how big the file is.
@@ -203,6 +222,37 @@ pub fn bitrate(quality: Quality, width: i32, height: i32, rate: FrameRate) -> u3
     let pixels = width.max(0) as u64 * height.max(0) as u64;
     let bits = pixels * u64::from(rate.fps()) * quality.bits_per_pixel_milli() / 1000;
     bits.clamp(u64::from(MIN_BITRATE), u64::from(MAX_BITRATE)) as u32
+}
+
+/// Where the record controls go (their top-left), for a bar `bar` (width, height) over `area`
+/// on `monitor`, `gap` pixels from the box's edge: always on the box's top edge, **just above
+/// it when it fits on the monitor, just inside it when it doesn't** (a full-screen box, a box
+/// at the monitor's top). Never anywhere else. It starts at the box's left edge; a box
+/// narrower than the bar has it overhang to the right, and it moves left only as far as it
+/// must to stay on the monitor.
+pub fn bar_origin(area: PixelRect, bar: (i32, i32), monitor: PixelRect, gap: i32) -> (i32, i32) {
+    let (w, h) = bar;
+    let above = area.top - gap - h;
+    let y = if above >= monitor.top {
+        above
+    } else {
+        // Inside, kept on the monitor even for a box too short to hold it.
+        (area.top + gap).min(monitor.bottom - h).max(monitor.top)
+    };
+    let x = area.left.min(monitor.right - w).max(monitor.left);
+    (x, y)
+}
+
+/// A recording's elapsed time as its timer shows it: `0:07`, `12:34`, `1:02:03`. Whole
+/// seconds, rounded down, so it ticks over as each second is done.
+pub fn timer_text(elapsed: std::time::Duration) -> String {
+    let s = elapsed.as_secs();
+    let (h, m, s) = (s / 3600, s / 60 % 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 /// The highest bitrate the encoder may reach for a moment, for a given average.

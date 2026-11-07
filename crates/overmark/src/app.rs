@@ -1,5 +1,6 @@
 //! The resident app's loop: the tray, the hotkeys, and the overlay while it's open.
 
+mod recording;
 mod tray_ui;
 
 use overmark_core::backdrop::Guides;
@@ -46,6 +47,10 @@ pub struct Args {
     pub test_drawing: bool,
     /// Make clean grabs without the grabber helper, by the GDI fallback (for checks of it).
     pub no_grabber: bool,
+    /// Never activate any window (for checks that drive the real app: they post their keys to
+    /// its windows, and the user's foreground stays as it is). The layer then has no keyboard of
+    /// its own.
+    pub no_activate: bool,
     /// Be the Settings window (`--settings`, on About with `--about`), not the tray.
     pub settings: Option<Page>,
 }
@@ -64,6 +69,7 @@ impl Args {
                 "--quit" => out.quit = true,
                 "--test-drawing" => out.test_drawing = true,
                 "--no-grabber" => out.no_grabber = true,
+                "--no-activate" => out.no_activate = true,
                 "--settings" => out.settings = out.settings.or(Some(Page::General)),
                 "--about" => out.settings = Some(Page::About),
                 overmark_win::grabber::ARG => out.grabber = true,
@@ -115,6 +121,10 @@ struct App {
     /// The toolbar's egui between openings (made and warmed once).
     toolbar_look: Option<toolbar::Look>,
     toolbar_collapsed: bool,
+    /// A box to record, its outline and bar, and its recording once started.
+    record: Option<crate::record_bar::RecordBox>,
+    /// The region being chosen is the box to record (the toolbar's Record), not a save.
+    pending_record: bool,
 }
 
 fn action_name(action: Action) -> String {
@@ -444,6 +454,7 @@ impl App {
             collapsed: self.toolbar_collapsed,
             disappearing_ink: self.settings.drawing.disappearing_ink,
             right_click_undoes: self.settings.drawing.right_click_undoes,
+            recording: self.record.is_some() || self.pending_record,
         }
     }
 
@@ -523,6 +534,10 @@ impl App {
                 self.flush();
                 return;
             }
+            A::Record => {
+                self.begin_record();
+                return;
+            }
             A::DisappearingInk(on) => {
                 // Settings' own setting, taken up as a change from Settings is (the ink is
                 // drawn again: a stroke half faded comes back whole when it's turned off),
@@ -557,8 +572,11 @@ impl App {
         });
     }
 
-    /// Closes the overlay: the strokes vanish: each opening starts clean.
+    /// Closes the overlay: the strokes vanish: each opening starts clean. A recording is
+    /// stopped and saved first: closing never loses one.
     fn close(&mut self) {
+        self.finish_recording();
+        self.pending_record = false;
         if let Some(tb) = self.toolbar.take() {
             self.toolbar_look = Some(tb.close());
         }
@@ -590,6 +608,7 @@ impl App {
         }
         self.flush();
         self.on_toolbar();
+        self.on_record();
     }
 
     /// While the toolbar's width strip is open, the arrows that come to the
@@ -631,6 +650,10 @@ impl App {
                 self.flush();
                 self.capture(c);
             }
+            OverlayEvent::RegionChosen { screen, rect } if self.pending_record => {
+                self.record_box_chosen(screen, rect);
+                self.raise_toolbar();
+            }
             OverlayEvent::RegionChosen { screen, rect } => {
                 self.region_chosen(screen, rect);
                 self.raise_toolbar();
@@ -650,6 +673,7 @@ impl App {
             }
             OverlayEvent::RegionCancelled => {
                 self.pending_region = None;
+                self.pending_record = false;
                 tracing::info!("region cancelled");
                 if std::mem::take(&mut self.ui.close_after_region) {
                     self.close();
@@ -664,6 +688,16 @@ impl App {
                     .overlay
                     .as_ref()
                     .is_some_and(Overlay::is_choosing_region) => {}
+            // Esc with a box chosen but nothing recorded yet: the box goes, the layer stays.
+            // (Recording, Esc closes the layer, which stops and saves first.)
+            OverlayEvent::Key {
+                vk: 0x1B,
+                ctrl: false,
+                alt: false,
+                ..
+            } if self.esc_cancels_record_box() && !self.ink.is_typing() => {
+                self.cancel_record_box();
+            }
             e => {
                 let outcome = self.ink.handle(e, &self.settings.drawing);
                 self.outcome(outcome);
@@ -688,6 +722,10 @@ impl App {
     fn raise_toolbar(&self) {
         if let Some(tb) = &self.toolbar {
             tb.raise();
+        }
+        // The record box's bar and outline over both.
+        if let Some(b) = &self.record {
+            b.raise();
         }
     }
 
@@ -805,12 +843,16 @@ impl App {
                 .as_ref()
                 .and_then(|_| self.wake.timeout(FRAME_MS));
             let bar = self.toolbar.as_ref().and_then(Toolbar::wait_ms);
+            let record = self
+                .record
+                .as_ref()
+                .and_then(crate::record_bar::RecordBox::wait_ms);
             // A click waiting for its double-click time comes back when that's up.
             let soonest = |a: Option<u32>, b: Option<u32>| match (a, b) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
             };
-            match (soonest(frame, bar), self.ui.wait_ms()) {
+            match (soonest(soonest(frame, bar), record), self.ui.wait_ms()) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
             }
@@ -831,6 +873,7 @@ impl App {
                         tracing::warn!(%error, "couldn't follow the taskbar's theme");
                     }
                 }
+                TrayEvent::Woken(recording::WAKE_RECORDING) => self.on_recording_woken(),
                 TrayEvent::Woken(code) => self.on_woken(code),
                 TrayEvent::ReloadRequested => self.reload_settings(),
                 TrayEvent::OpenRequested { frozen } => {
@@ -912,6 +955,9 @@ pub fn run(args: Args) -> i32 {
         return overmark_win::grabber::serve();
     }
     let _ = dpi::enable_per_monitor_v2();
+    if args.no_activate {
+        window::never_activate();
+    }
     overmark_core::i18n::init(&language::ui_language());
     if let Some(page) = args.settings {
         // Settings logs to stderr only: the file is the tray's (one writer rolls it).
@@ -1007,6 +1053,8 @@ pub fn run(args: Args) -> i32 {
         toolbar: None,
         toolbar_look: None,
         toolbar_collapsed: false,
+        record: None,
+        pending_record: false,
     };
     for n in &startup.notices {
         tracing::warn!(title = %n.title, body = %n.body, "start-up notice");
@@ -1117,8 +1165,9 @@ impl App {
     fn capture(&mut self, command: Command) {
         let started = clock::now_secs();
         let (x, y) = shell::cursor();
-        let with_drawing =
-            command != Command::SaveWithoutDrawing && self.settings.capture.include_drawing;
+        // A box to record is chosen on the screen as it is, drawing and all: the video has it.
+        let with_drawing = self.pending_record
+            || (command != Command::SaveWithoutDrawing && self.settings.capture.include_drawing);
         let Some(overlay) = self.overlay.as_ref() else {
             return;
         };

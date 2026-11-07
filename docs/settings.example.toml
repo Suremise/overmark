@@ -81,6 +81,20 @@ include_drawing = true
 # Show a small notice after each capture saying where it went (default true).
 toast = true
 
+# Recording a box of the screen to an MP4 video, saved in the captures folder.
+[recording]
+# Frames a second: 15 (the default), 24 or 30.
+frame_rate = 15
+# "small", "balanced" (the default) or "sharp": how much a busy video may take. A still
+# screen costs little at any of them.
+quality = "balanced"
+# Show the mouse pointer in the video (default true).
+pointer = true
+# "automatic" (the default: the graphics card's encoder when it can take the video,
+# otherwise Windows' software one) or "software" (Windows' own: smaller files of a still screen,
+# more work for the processor).
+encoder = "automatic"
+
 [advanced]
 # Look for a newer version on GitHub. Overmark only reads the latest release and never
 # downloads or installs anything by itself (default false: no network at all).

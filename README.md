@@ -56,6 +56,10 @@ layer, and the drawing goes with it: each time starts clean.
 | **1**–**9** | Pick a colour from the palette |
 | **Esc** | Close the layer |
 
+**Record** on the toolbar records a box of the screen to a small MP4, with your drawing in it:
+drag the box, then use the bar on its edge to record, pause, stop (which saves) or discard. The
+bar and the box's outline are never in the video, and there's no sound.
+
 The hotkeys can be changed in Settings. Overmark never uses a keyboard or mouse hook: global
 hotkeys go through Windows' `RegisterHotKey` only.
 

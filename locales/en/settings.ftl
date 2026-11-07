@@ -115,6 +115,24 @@ settings-jpg-quality = JPG quality
 settings-include-drawing = Include the drawing by default
 settings-toast = Show a notice after each capture
 
+## Capture: recording a box of the screen to a video
+
+settings-recording = Recording
+settings-recording-description = Videos are saved in the folder above, named by the pattern above. Record from the drawing toolbar: drag a box, then press Record on the bar above it. Your drawing is always in the video; there is no sound.
+settings-recording-frame-rate = Frame rate
+# $fps: frames a second (15, 24 or 30).
+settings-recording-fps = { $fps } fps
+settings-recording-quality = Quality
+settings-recording-quality-description = How much a busy video may take. A still screen stays small at any of them.
+settings-recording-quality-small = Small
+settings-recording-quality-balanced = Balanced
+settings-recording-quality-sharp = Sharp
+settings-recording-pointer = Show the mouse pointer
+settings-recording-encoder = Encoder
+settings-recording-encoder-description = Automatic uses the graphics card's encoder when it can take the video, and Windows' own otherwise. Software always uses Windows' own: smaller videos of a still screen, more work for the processor.
+settings-recording-encoder-automatic = Automatic
+settings-recording-encoder-software = Software
+
 ## About and advanced
 
 settings-version = Version

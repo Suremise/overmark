@@ -221,3 +221,68 @@ fn every_error_has_a_message() {
             .contains("34")
     );
 }
+
+const MONITOR: PixelRect = PixelRect::new(0, 0, 1920, 1080);
+const BAR: (i32, i32) = (300, 40);
+
+#[test]
+fn the_bar_sits_just_above_the_box_when_it_fits() {
+    let area = PixelRect::new(400, 300, 1000, 700);
+    assert_eq!(bar_origin(area, BAR, MONITOR, 6), (400, 300 - 6 - 40));
+    // Exactly enough room above: still above.
+    let area = PixelRect::new(400, 46, 1000, 700);
+    assert_eq!(bar_origin(area, BAR, MONITOR, 6), (400, 0));
+}
+
+#[test]
+fn the_bar_goes_just_inside_the_top_edge_without_room_above() {
+    // At the monitor's top edge.
+    let area = PixelRect::new(400, 10, 1000, 700);
+    assert_eq!(bar_origin(area, BAR, MONITOR, 6), (400, 16));
+    // Full screen.
+    assert_eq!(bar_origin(MONITOR, BAR, MONITOR, 6), (0, 6));
+    // On a second monitor to the right, full screen there.
+    let right = PixelRect::new(1920, 0, 3840, 1080);
+    assert_eq!(bar_origin(right, BAR, right, 6), (1920, 6));
+}
+
+#[test]
+fn a_box_narrower_than_the_bar_has_it_overhang_from_its_left_edge() {
+    let area = PixelRect::new(500, 500, 600, 560);
+    let (x, y) = bar_origin(area, BAR, MONITOR, 6);
+    assert_eq!((x, y), (500, 454));
+    assert!(x + BAR.0 > area.right, "it overhangs the box");
+}
+
+#[test]
+fn the_bar_stays_on_the_monitor() {
+    // A narrow box at the right edge: moved left only as far as it must.
+    let area = PixelRect::new(1800, 500, 1900, 600);
+    assert_eq!(bar_origin(area, BAR, MONITOR, 6), (1920 - 300, 454));
+    // A short box at the top whose inside can't hold the bar: on the monitor all the same.
+    let short = PixelRect::new(0, 0, 400, 20);
+    let tiny_monitor = PixelRect::new(0, 0, 800, 30);
+    assert_eq!(bar_origin(short, BAR, tiny_monitor, 6), (0, 0));
+}
+
+#[test]
+fn frame_rates_snap_to_the_nearest() {
+    use FrameRate::*;
+    assert_eq!(
+        [0, 15, 19, 20, 24, 27, 30, 60, u32::MAX].map(FrameRate::nearest),
+        [
+            Fps15, Fps15, Fps15, Fps24, Fps24, Fps24, Fps30, Fps30, Fps30
+        ]
+    );
+}
+
+#[test]
+fn the_timer_reads_minutes_and_seconds_then_hours() {
+    use std::time::Duration;
+    let t = |ms: u64| timer_text(Duration::from_millis(ms));
+    assert_eq!(t(0), "0:00");
+    assert_eq!(t(7_999), "0:07");
+    assert_eq!(t(754_000), "12:34");
+    assert_eq!(t(3_599_999), "59:59");
+    assert_eq!(t(3_723_000), "1:02:03");
+}

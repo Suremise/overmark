@@ -370,6 +370,7 @@ fn toolbar_shot_of(
         collapsed: false,
         disappearing_ink: false,
         right_click_undoes: true,
+        recording: false,
     };
     let mut state = state;
     tweak(&mut state);

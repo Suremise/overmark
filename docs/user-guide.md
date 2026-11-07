@@ -150,6 +150,45 @@ In Settings (Capture) you can change:
 From the tray, **Capture a region…**, or its hotkey **Win+Shift+X** from anywhere, freezes the
 screen, lets you choose a region, and closes the layer again once it's captured.
 
+## Recording a video
+
+With the layer open, **Record** on the toolbar (a dot in a ring) records a box of the screen to
+a small MP4 video, **with your drawing in it**: you go on drawing while it records. There is no
+sound.
+
+1. Press **Record**, then drag a box over the screen, as for Save a region. **Esc** cancels.
+2. An outline marks the box, and a small bar sits on its top edge: just above the box, or just
+   inside it when there's no room above (a box the size of the screen). Press **Record** on the
+   bar to start.
+3. While it records, the outline turns red and the bar shows **Pause**, **Stop**, the time
+   recorded and **✕**. **Pause** stops the recording until you **Resume** (the video has no gap
+   where it was paused). Draw anywhere meanwhile: the outline and the bar never take your clicks
+   from the drawing, except on the bar's own buttons.
+4. **Stop** saves the video in your captures folder, named as captures are
+   (`2026-11-07 10.15.02.mp4`), and the notice says where: **click it** to play the video, or
+   **right-click it** to open its folder.
+
+**✕** before you start closes the box. On a recording, it asks first, in the bar: **Discard**
+throws the recording away, **Keep** carries on. **Esc** before you start closes the box (the
+layer stays open); **Esc** while recording, or anything else that closes the layer, **stops and
+saves first**: closing never loses a recording.
+
+The box must be on one monitor. A recording stops by itself if the screen can no longer be
+recorded (you lock the PC, or unplug the monitor): what was recorded until then is saved, and the
+notice says why. The outline, the bar and the toolbar are never in the video; the screen and your
+drawing are.
+
+In Settings (Capture, Recording) you can change the **frame rate** (15, 24 or 30 frames a second;
+15 keeps files small), the **quality** (Small, Balanced or Sharp: how much a busy video may take;
+a still screen stays small at any of them), whether the **mouse pointer** shows, and the
+**encoder**: **Automatic** uses your graphics card's encoder when it can take the video, and
+Windows' own otherwise; **Software** always uses Windows' own, which makes smaller videos of a
+still screen and works the processor harder. A minute of a small, mostly still box (Task Manager,
+say) is under a megabyte or two.
+
+On Windows N editions recording needs the Media Feature Pack (Settings › Apps › Optional
+features); without it, Overmark says so when you press Record.
+
 ## The toolbar
 
 While the layer is open, a small toolbar floats at the top centre of the monitor the pointer is
@@ -180,6 +219,8 @@ far right, or clicking its button again, closes it. Esc still closes the layer.
 - **Disappearing ink**, on or off (Settings' own setting, saved).
 - **Undo** and **Redo**, greyed out when there's nothing to undo or redo, and **Clear**.
 - **Save**, **Save a region** and **Copy**, and **More**, with **Save without the drawing**.
+- **Record**, which records a video of a box of the screen with your drawing (see Recording a
+  video); greyed out while a box is open.
 - **Freeze**, an amber pause button while Live, or **Unfreeze**, a green play button while Frozen
   (F does the same); greyed out on the whiteboard and blackboard.
 - **Collapse**, which shrinks the toolbar to a small pill showing the grip and the backdrop's icon;

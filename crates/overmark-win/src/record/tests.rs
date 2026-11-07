@@ -474,3 +474,37 @@ fn write_a_sample_clip() {
     let saved = rec.stop().unwrap();
     println!("{saved:?}");
 }
+
+/// A width that isn't a multiple of 16 (the decoder pads its rows): the colours still come
+/// back where they were.
+#[test]
+fn an_unaligned_width_decodes_back_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = start_pattern(
+        dir.path(),
+        680,
+        162,
+        RecordSettings::default(),
+        None,
+        Box::new(|| {}),
+    )
+    .unwrap();
+    record_for(&rec, Duration::from_millis(300));
+    let saved = rec.stop().unwrap();
+    let (w, h, bgra) = mf::decode_frame_at(&saved.path, 0).unwrap();
+    assert_eq!((w, h), (680, 162));
+    let at = |x: usize, y: usize| {
+        let i = (y * w as usize + x) * 4;
+        [bgra[i], bgra[i + 1], bgra[i + 2]]
+    };
+    // The left half is the pattern's colour on every row, the far right black.
+    for y in [0, 40, 100, 161] {
+        let p = at(100, y);
+        assert!(
+            (0..3).all(|c| p[c].abs_diff(LEFT[c]) <= 8),
+            "row {y}: {p:?}"
+        );
+        let q = at(679, y);
+        assert!(q.iter().all(|&v| v <= 24), "row {y}, right edge: {q:?}");
+    }
+}

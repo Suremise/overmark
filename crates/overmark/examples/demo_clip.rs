@@ -157,6 +157,7 @@ fn render_frame(
             collapsed: false,
             disappearing_ink: false,
             right_click_undoes: true,
+            recording: false,
         };
         render_offscreen(&state, tw, th, SCALE, 3, None)
     });

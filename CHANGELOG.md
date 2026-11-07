@@ -6,6 +6,14 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Record a video** of part of the screen with your drawing: Record on the toolbar, drag a box,
+  then record, pause, stop or discard from the small bar on the box's edge. Videos are small
+  MP4s, saved in the captures folder with the usual notice; there's no sound. Closing the layer
+  while recording saves first. Settings › Capture › Recording sets the frame rate, the quality,
+  the mouse pointer and the encoder.
+
 ## [0.2.1] - 2026-11-04
 
 Choosing a region works on every monitor, the toolbar keeps working after Alt+Tab, and a

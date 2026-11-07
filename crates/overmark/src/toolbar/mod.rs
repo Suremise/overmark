@@ -102,7 +102,7 @@ type Frame = (
 /// What takes the pointer, in pixels: the frames of what's shown (the toolbar, a strip, the
 /// More menu), and their border. Not a tooltip, nor a shadow round a frame: those are drawn
 /// below the toolbar, and a press there that the window took would never draw.
-fn solid(ctx: &egui::Context, ppp: f32) -> Vec<Rect> {
+pub(crate) fn solid(ctx: &egui::Context, ppp: f32) -> Vec<Rect> {
     ctx.memory(|m| {
         let mut layers: Vec<_> = m
             .areas()
@@ -126,6 +126,81 @@ fn solid(ctx: &egui::Context, ppp: f32) -> Vec<Rect> {
     })
 }
 
+/// What a frame of an egui window drawn on the CPU gave: what its controls asked for, its
+/// accessibility tree, when it wants the next frame, and what's solid (pixels).
+pub(crate) struct Drawn<A> {
+    pub actions: Vec<A>,
+    pub tree: Option<egui::accesskit::TreeUpdate>,
+    pub delay: std::time::Duration,
+    pub solid: Vec<Rect>,
+}
+
+/// One frame of an egui window of Overmark's own (the toolbar, the record bar): `show` lays it
+/// out in `ctx` with `events`; epaint tessellates it and [`raster`] draws it into `pixels`
+/// (BGRA, `w` × `h`, at `ppp`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_frame<A>(
+    ctx: &egui::Context,
+    textures: &mut raster::Textures,
+    started: Instant,
+    pixels: &mut [u8],
+    w: usize,
+    h: usize,
+    ppp: f32,
+    events: Vec<egui::Event>,
+    show: impl FnOnce(&egui::Context) -> Vec<A>,
+) -> Drawn<A> {
+    let mut raw = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(
+            Pos2::ZERO,
+            vec2(w as f32 / ppp, h as f32 / ppp),
+        )),
+        time: Some(started.elapsed().as_secs_f64()),
+        events,
+        focused: true,
+        ..Default::default()
+    };
+    raw.viewports
+        .entry(ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(ppp);
+    let mut show = Some(show);
+    let mut actions = Vec::new();
+    let output = ctx.run_ui(raw, |ui| {
+        if let Some(show) = show.take() {
+            actions = show(ui.ctx());
+        }
+    });
+    let solid = solid(ctx, ppp);
+    textures.set(&output.textures_delta);
+    let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+    pixels.fill(0);
+    raster::paint(
+        &mut raster::Target {
+            pixels,
+            width: w,
+            height: h,
+        },
+        output.pixels_per_point,
+        &primitives,
+        textures,
+    );
+    textures.free(&output.textures_delta);
+    let mut delta = output.textures_delta;
+    delta.clear();
+    let delay = output
+        .viewport_output
+        .get(&ViewportId::ROOT)
+        .map(|v| v.repaint_delay)
+        .unwrap_or(std::time::Duration::MAX);
+    Drawn {
+        actions,
+        tree: output.platform_output.accesskit_update,
+        delay,
+        solid,
+    }
+}
+
 /// One frame of the toolbar showing `state` with `events`, into `pixels` (BGRA, `w` × `h`).
 fn run_frame(
     look: &mut Look,
@@ -136,57 +211,22 @@ fn run_frame(
     ppp: f32,
     events: Vec<egui::Event>,
 ) -> Frame {
-    let mut raw = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(
-            Pos2::ZERO,
-            vec2(w as f32 / ppp, h as f32 / ppp),
-        )),
-        time: Some(look.started.elapsed().as_secs_f64()),
+    let drawn = draw_frame(
+        &look.ctx,
+        &mut look.textures,
+        look.started,
+        pixels,
+        w,
+        h,
+        ppp,
         events,
-        focused: true,
-        ..Default::default()
-    };
-    raw.viewports
-        .entry(ViewportId::ROOT)
-        .or_default()
-        .native_pixels_per_point = Some(ppp);
-    let mut actions = Vec::new();
-    let output = look.ctx.run_ui(raw, |ui| {
-        actions = ui::show(ui.ctx(), state);
-    });
+        |ctx| ui::show(ctx, state),
+    );
     let grip = look
         .ctx
         .data(|d| d.get_temp::<Rect>(ui::grip_id()))
         .map(|r| Rect::from_min_max(r.min * ppp, r.max * ppp));
-    let solid = solid(&look.ctx, ppp);
-    look.textures.set(&output.textures_delta);
-    let primitives = look.ctx.tessellate(output.shapes, output.pixels_per_point);
-    pixels.fill(0);
-    raster::paint(
-        &mut raster::Target {
-            pixels,
-            width: w,
-            height: h,
-        },
-        output.pixels_per_point,
-        &primitives,
-        &look.textures,
-    );
-    look.textures.free(&output.textures_delta);
-    let mut delta = output.textures_delta;
-    delta.clear();
-    let delay = output
-        .viewport_output
-        .get(&ViewportId::ROOT)
-        .map(|v| v.repaint_delay)
-        .unwrap_or(std::time::Duration::MAX);
-    (
-        actions,
-        output.platform_output.accesskit_update,
-        delay,
-        grip,
-        solid,
-    )
+    (drawn.actions, drawn.tree, drawn.delay, grip, drawn.solid)
 }
 
 /// The toolbar while the layer is open.
@@ -540,6 +580,7 @@ mod tests {
             collapsed: false,
             disappearing_ink: false,
             right_click_undoes: true,
+            recording: false,
         };
         let (w, h) = (1040, 360);
         for group in [
@@ -611,6 +652,7 @@ mod tests {
             collapsed: false,
             disappearing_ink: false,
             right_click_undoes: true,
+            recording: false,
         };
         let (w, h) = (1040, 360);
         let takes = |solid: &[Rect], x: usize, y: usize| {
@@ -759,6 +801,7 @@ mod tests {
             collapsed: false,
             disappearing_ink: false,
             right_click_undoes: true,
+            recording: false,
         };
         let (w, h) = (1040, 360);
         // An area measures itself in its first frame and shows from the next ones.

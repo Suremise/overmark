@@ -182,13 +182,17 @@ const FROZEN_TINT_MIN: f32 = 0.12;
 /// The ink layer's empty pixel: alpha 1, so clicks on it are the layer's.
 const EMPTY: [u8; 4] = [0, 0, 0, 1];
 
-struct Layer {
-    window: Window,
-    surface: LayeredSurface,
+pub(crate) struct Layer {
+    pub(crate) window: Window,
+    pub(crate) surface: LayeredSurface,
 }
 
 impl Layer {
-    fn new(rect: Rect, options: Options, handler: Handler) -> windows::core::Result<Layer> {
+    pub(crate) fn new(
+        rect: Rect,
+        options: Options,
+        handler: Handler,
+    ) -> windows::core::Result<Layer> {
         Ok(Layer {
             window: Window::new(
                 rect,
@@ -202,7 +206,7 @@ impl Layer {
         })
     }
 
-    fn present(&mut self, origin: (i32, i32)) -> windows::core::Result<()> {
+    pub(crate) fn present(&mut self, origin: (i32, i32)) -> windows::core::Result<()> {
         self.surface.present(self.window.hwnd(), origin, None)
     }
 }
@@ -374,8 +378,7 @@ pub struct Overlay {
     events: Rc<RefCell<Vec<OverlayEvent>>>,
     /// Choosing a region: a selection window on every monitor, and what each got (its
     /// monitor's index with it).
-    selection: Option<Regions>,
-    selection_events: Rc<RefCell<Vec<(usize, SelectionInput)>>>,
+    selection: Option<crate::region::Picker>,
     /// The exe that serves clean grabs (`--grabber`), and the helper while it runs.
     grabber_exe: Option<std::path::PathBuf>,
     grabber: Option<Grabber>,
@@ -791,7 +794,6 @@ impl Overlay {
             dim,
             events,
             selection: None,
-            selection_events: Rc::new(RefCell::new(Vec::new())),
             grabber_exe: grabber_exe.map(std::path::Path::to_path_buf),
             grabber: None,
             previous_focus,
@@ -1157,11 +1159,15 @@ impl Overlay {
     /// its drag is followed here, and only its outcome comes out.
     pub fn take_events(&mut self) -> Vec<OverlayEvent> {
         let events = std::mem::take(&mut *self.events.borrow_mut());
-        let inputs = std::mem::take(&mut *self.selection_events.borrow_mut());
+        let inputs = self
+            .selection
+            .as_mut()
+            .map(crate::region::Picker::take_inputs)
+            .unwrap_or_default();
         let sifted = sift(
             events,
             inputs,
-            self.selection.as_mut().map(|r| &mut r.chooser),
+            self.selection.as_mut().map(crate::region::Picker::chooser),
         );
         if let Some(regions) = self.selection.as_mut() {
             for i in sifted.redraw {
@@ -1362,39 +1368,8 @@ impl Overlay {
         focus: usize,
         images: &[crate::save::Image],
     ) -> windows::core::Result<()> {
-        let mut windows = Vec::with_capacity(self.screens.len());
-        for (i, (s, image)) in self.screens.iter().zip(images).enumerate() {
-            windows.push(Selection::new(
-                i,
-                &s.monitor,
-                image,
-                self.selection_events.clone(),
-            )?);
-        }
-        // Shown together, the cursor's monitor's last: it takes the keyboard.
-        for w in windows.iter().filter(|w| w.screen != focus) {
-            w.layer.window.show(false);
-        }
-        if let Some(w) = windows
-            .iter()
-            .find(|w| w.screen == focus)
-            .or(windows.first())
-        {
-            w.layer.window.show(true);
-            let took = w.layer.window.focus();
-            tracing::debug!(
-                screen = w.screen,
-                monitor = %self.screens[w.screen].monitor.name,
-                took,
-                foreground = %Named(window::foreground()),
-                "the selection's keyboard"
-            );
-        }
-        let sizes = windows.iter().map(|w| w.size()).collect();
-        self.selection = Some(Regions {
-            windows,
-            chooser: Chooser::new(sizes),
-        });
+        let monitors: Vec<Monitor> = self.screens.iter().map(|s| s.monitor.clone()).collect();
+        self.selection = Some(crate::region::Picker::open(&monitors, images, focus)?);
         Ok(())
     }
 
@@ -1407,11 +1382,7 @@ impl Overlay {
         self.screens
             .iter()
             .any(|s| s.ink.window.hwnd() == foreground)
-            || self.selection.as_ref().is_some_and(|r| {
-                r.windows
-                    .iter()
-                    .any(|w| w.layer.window.hwnd() == foreground)
-            })
+            || self.selection.as_ref().is_some_and(|r| r.owns(foreground))
     }
 
     /// Gives the keyboard back to the layer (the primary monitor's ink layer), as on opening.
@@ -1440,10 +1411,7 @@ impl Overlay {
 
     /// Monitor `i`'s selection window, while a region is being chosen (for checks to drive).
     pub fn selection_window(&self, i: usize) -> Option<HWND> {
-        self.selection
-            .as_ref()
-            .and_then(|r| r.windows.iter().find(|w| w.screen == i))
-            .map(|w| w.layer.window.hwnd())
+        self.selection.as_ref().and_then(|r| r.window(i))
     }
 
     /// The primary monitor's ink layer (for tests and checks to post keys to).
@@ -1466,25 +1434,6 @@ impl Overlay {
     }
 }
 
-/// What the selection window got.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SelectionInput {
-    Down(i32, i32),
-    Move(i32, i32),
-    Up(i32, i32),
-    Escape,
-}
-
-/// The rectangle between two points, the far edges included.
-fn span(a: (i32, i32), b: (i32, i32)) -> Rect {
-    Rect::new(
-        a.0.min(b.0),
-        a.1.min(b.1),
-        a.0.max(b.0) + 1,
-        a.1.max(b.1) + 1,
-    )
-}
-
 /// What [`sift`] made of a turn's events.
 #[derive(Debug, Default, PartialEq)]
 struct Sifted {
@@ -1502,8 +1451,8 @@ struct Sifted {
 /// [`reaches_ink_while_choosing`] lets through goes on.
 fn sift(
     events: Vec<OverlayEvent>,
-    inputs: Vec<(usize, SelectionInput)>,
-    chooser: Option<&mut Chooser>,
+    inputs: Vec<(usize, crate::region::SelectionInput)>,
+    chooser: Option<&mut crate::region::Chooser>,
 ) -> Sifted {
     let Some(chooser) = chooser else {
         return Sifted {
@@ -1520,15 +1469,17 @@ fn sift(
     };
     for (screen, input) in inputs {
         let done = match chooser.input(screen, input) {
-            Choice::Going(None) => continue,
-            Choice::Going(Some(changed)) => {
+            crate::region::Choice::Going(None) => continue,
+            crate::region::Choice::Going(Some(changed)) => {
                 if !sifted.redraw.contains(&changed) {
                     sifted.redraw.push(changed);
                 }
                 continue;
             }
-            Choice::Chosen { screen, rect } => OverlayEvent::RegionChosen { screen, rect },
-            Choice::Cancelled => OverlayEvent::RegionCancelled,
+            crate::region::Choice::Chosen { screen, rect } => {
+                OverlayEvent::RegionChosen { screen, rect }
+            }
+            crate::region::Choice::Cancelled => OverlayEvent::RegionCancelled,
         };
         sifted.out.push(done);
         sifted.ended = true;
@@ -1536,379 +1487,6 @@ fn sift(
         break;
     }
     sifted
-}
-
-/// Choosing a region: each monitor's selection window, and the drag they share.
-struct Regions {
-    windows: Vec<Selection>,
-    chooser: Chooser,
-}
-
-impl Regions {
-    /// Shows monitor `i`'s drag as it is now.
-    fn redraw(&mut self, i: usize) {
-        let rect = self.chooser.rect(i);
-        if let Some(w) = self.windows.iter_mut().find(|w| w.screen == i) {
-            w.rect = rect;
-            w.redraw();
-        }
-    }
-}
-
-/// What a selection input did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Choice {
-    /// Still choosing; the monitor whose drag changed, to be shown again.
-    Going(Option<usize>),
-    /// A region on monitor `screen`, in its pixels.
-    Chosen { screen: usize, rect: Rect },
-    /// Esc on any monitor.
-    Cancelled,
-}
-
-/// The drag across the monitors' selection windows (each monitor's pixels): one at a time, on
-/// the monitor where its button went down, clipped to that monitor.
-struct Chooser {
-    /// Each monitor's size.
-    sizes: Vec<(i32, i32)>,
-    /// The drag: its monitor, where it started and the rectangle so far.
-    drag: Option<(usize, (i32, i32), Rect)>,
-}
-
-impl Chooser {
-    fn new(sizes: Vec<(i32, i32)>) -> Chooser {
-        Chooser { sizes, drag: None }
-    }
-
-    /// Monitor `i`'s rectangle so far (empty while nothing is dragged there).
-    fn rect(&self, i: usize) -> Rect {
-        match self.drag {
-            Some((at, _, r)) if at == i => r,
-            _ => Rect::default(),
-        }
-    }
-
-    /// The rectangle from `start` to `to` on monitor `i`, clipped to it (with the mouse
-    /// captured, a drag goes on past the monitor's edge).
-    fn span_on(&self, i: usize, start: (i32, i32), to: (i32, i32)) -> Rect {
-        let (w, h) = self.sizes[i];
-        span(start, to).clamp_to(w, h)
-    }
-
-    /// Monitor `screen`'s selection window got `input`.
-    fn input(&mut self, screen: usize, input: SelectionInput) -> Choice {
-        if input == SelectionInput::Escape {
-            return Choice::Cancelled;
-        }
-        if screen >= self.sizes.len() {
-            return Choice::Going(None);
-        }
-        match (input, self.drag) {
-            // Another monitor's input while a drag goes on waits for it to end.
-            (_, Some((at, ..))) if at != screen => Choice::Going(None),
-            (SelectionInput::Down(x, y), _) => {
-                let rect = self.span_on(screen, (x, y), (x, y));
-                self.drag = Some((screen, (x, y), rect));
-                Choice::Going(Some(screen))
-            }
-            (SelectionInput::Move(x, y), Some((at, start, _))) => {
-                self.drag = Some((at, start, self.span_on(at, start, (x, y))));
-                Choice::Going(Some(at))
-            }
-            (SelectionInput::Up(x, y), Some((at, start, _))) => {
-                let rect = self.span_on(at, start, (x, y));
-                self.drag = None;
-                // A click without a drag chooses nothing: keep choosing.
-                if rect.width() < 4 || rect.height() < 4 {
-                    Choice::Going(Some(at))
-                } else {
-                    Choice::Chosen { screen: at, rect }
-                }
-            }
-            // A move or a lift with no drag (the button went down elsewhere).
-            _ => Choice::Going(None),
-        }
-    }
-}
-
-/// A line of white text on a dark pill, for the region selection (drawn with core's own text
-/// shaping and Windows' fonts, as the Text tool is).
-struct Label {
-    /// BGRA, premultiplied, `width` × `height`.
-    pixels: Vec<u8>,
-    width: i32,
-    height: i32,
-}
-
-impl Label {
-    /// `text` at 14 points times `scale`; `None` without fonts (nothing to show).
-    fn new(text: &str, scale: f32) -> Option<Label> {
-        use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
-        let size = 14.0 * scale;
-        let shape = crate::core::text::shape(text, size);
-        if shape.glyphs.elements().is_empty() {
-            return None;
-        }
-        let pad_x = (10.0 * scale).round();
-        let pad_y = (5.0 * scale).round();
-        let w = (shape.width as f32 + 2.0 * pad_x).ceil() as u32;
-        let h = (shape.height as f32 + 2.0 * pad_y).ceil() as u32;
-        let mut pixmap = Pixmap::new(w, h)?;
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(20, 20, 20, 210);
-        paint.anti_alias = true;
-        let radius = h as f32 / 2.0;
-        let pill = {
-            let mut pb = PathBuilder::new();
-            pb.push_circle(radius, radius, radius);
-            pb.push_circle(w as f32 - radius, radius, radius);
-            pb.push_rect(tiny_skia::Rect::from_xywh(
-                radius,
-                0.0,
-                (w as f32 - 2.0 * radius).max(0.0),
-                h as f32,
-            )?);
-            pb.finish()?
-        };
-        pixmap.fill_path(
-            &pill,
-            &paint,
-            FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
-        let mut pb = PathBuilder::new();
-        for el in shape.glyphs.elements() {
-            use kurbo::PathEl;
-            let p = |pt: kurbo::Point| (pt.x as f32, pt.y as f32);
-            match *el {
-                PathEl::MoveTo(a) => pb.move_to(p(a).0, p(a).1),
-                PathEl::LineTo(a) => pb.line_to(p(a).0, p(a).1),
-                PathEl::QuadTo(a, b) => pb.quad_to(p(a).0, p(a).1, p(b).0, p(b).1),
-                PathEl::CurveTo(a, b, c) => {
-                    pb.cubic_to(p(a).0, p(a).1, p(b).0, p(b).1, p(c).0, p(c).1)
-                }
-                PathEl::ClosePath => pb.close(),
-            }
-        }
-        if let Some(glyphs) = pb.finish() {
-            paint.set_color_rgba8(255, 255, 255, 255);
-            pixmap.fill_path(
-                &glyphs,
-                &paint,
-                FillRule::Winding,
-                Transform::from_translate(pad_x, pad_y),
-                None,
-            );
-        }
-        let mut pixels = pixmap.take();
-        for p in pixels.as_chunks_mut::<4>().0 {
-            p.swap(0, 2);
-        }
-        Some(Label {
-            pixels,
-            width: w as i32,
-            height: h as i32,
-        })
-    }
-
-    /// Draws it over `px` (BGRA, opaque, `w` × `h`) with its top-left at `at`, clipped.
-    fn draw(&self, px: &mut [u8], w: i32, h: i32, at: (i32, i32)) {
-        for y in 0..self.height {
-            let ty = at.1 + y;
-            if !(0..h).contains(&ty) {
-                continue;
-            }
-            for x in 0..self.width {
-                let tx = at.0 + x;
-                if !(0..w).contains(&tx) {
-                    continue;
-                }
-                let s = &self.pixels[((y * self.width + x) * 4) as usize..][..4];
-                let keep = 255 - u16::from(s[3]);
-                let i = ((ty * w + tx) * 4) as usize;
-                for c in 0..3 {
-                    px[i + c] = (u16::from(s[c]) + u16::from(px[i + c]) * keep / 255) as u8;
-                }
-            }
-        }
-    }
-}
-
-/// The region's hint, the text fonts loaded first: a region can be chosen before the layer's
-/// first turn has loaded them (the tray's Capture a region…, on a fresh start).
-fn hint_label(scale: f32) -> Option<Label> {
-    crate::fonts::ensure_loaded();
-    Label::new(&crate::core::i18n::tr("region-hint"), scale)
-}
-
-/// One monitor's part of choosing a region: a window over it, excluded from capture, showing
-/// the image to be saved still, darkened outside the rectangle being dragged.
-struct Selection {
-    /// Its monitor's index.
-    screen: usize,
-    layer: Layer,
-    origin: (i32, i32),
-    /// The monitor's scale, for the labels' size.
-    scale: f32,
-    /// "Drag to select a region. Esc cancels.", made once (BGRA, premultiplied, and its size).
-    hint: Option<Label>,
-    /// The image (BGRA, opaque) and its darkened copy.
-    bright: Vec<u8>,
-    shaded: Vec<u8>,
-    width: i32,
-    height: i32,
-    /// The rectangle being dragged here (empty while there's none).
-    rect: Rect,
-}
-
-impl Selection {
-    /// Monitor `screen`'s selection window, made and filled but not shown yet.
-    fn new(
-        screen: usize,
-        monitor: &Monitor,
-        image: &crate::save::Image,
-        inputs: Rc<RefCell<Vec<(usize, SelectionInput)>>>,
-    ) -> windows::core::Result<Selection> {
-        use windows::Win32::UI::WindowsAndMessaging::{WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE};
-        let xy = |lp: windows::Win32::Foundation::LPARAM| {
-            (
-                (lp.0 & 0xFFFF) as u16 as i16 as i32,
-                ((lp.0 >> 16) & 0xFFFF) as u16 as i16 as i32,
-            )
-        };
-        let handler: Handler = Box::new(move |hwnd, msg, wp, lp| match msg {
-            WM_LBUTTONDOWN => {
-                window::capture_mouse(hwnd);
-                inputs
-                    .borrow_mut()
-                    .push((screen, SelectionInput::Down(xy(lp).0, xy(lp).1)));
-                Some(LRESULT(0))
-            }
-            WM_MOUSEMOVE => {
-                inputs
-                    .borrow_mut()
-                    .push((screen, SelectionInput::Move(xy(lp).0, xy(lp).1)));
-                Some(LRESULT(0))
-            }
-            WM_LBUTTONUP => {
-                window::release_mouse();
-                inputs
-                    .borrow_mut()
-                    .push((screen, SelectionInput::Up(xy(lp).0, xy(lp).1)));
-                Some(LRESULT(0))
-            }
-            WM_KEYDOWN | WM_SYSKEYDOWN if wp.0 == 0x1B => {
-                inputs.borrow_mut().push((screen, SelectionInput::Escape));
-                Some(LRESULT(0))
-            }
-            _ => None,
-        });
-        let mut layer = Layer::new(
-            monitor.rect,
-            Options {
-                title: Some(window::title("window-selection-name")),
-                ..Default::default()
-            },
-            handler,
-        )?;
-        affinity::set_excluded(layer.window.hwnd(), true)?;
-        let bright = image.to_bgra();
-        let shaded: Vec<u8> = bright
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|p| {
-                let d = |c: u8| (u16::from(c) * 55 / 100) as u8;
-                [d(p[0]), d(p[1]), d(p[2]), 255]
-            })
-            .collect();
-        let px = layer.surface.pixels();
-        if px.len() == shaded.len() {
-            px.copy_from_slice(&shaded);
-        }
-        let origin = (monitor.rect.left, monitor.rect.top);
-        layer.present(origin)?;
-        let scale = monitor.scale();
-        let hint = hint_label(scale);
-        let mut selection = Selection {
-            screen,
-            layer,
-            origin,
-            scale,
-            hint,
-            bright,
-            shaded,
-            width: monitor.rect.width(),
-            height: monitor.rect.height(),
-            rect: Rect::default(),
-        };
-        // The hint from the start, before anything is dragged.
-        selection.redraw();
-        Ok(selection)
-    }
-
-    /// Shows the image darkened but for `rect`, which is bright, with a white edge; the hint
-    /// at the top, and the region's size by it while there is one.
-    fn redraw(&mut self) {
-        let w = self.width;
-        let px = self.layer.surface.pixels();
-        if px.len() != self.shaded.len() {
-            return;
-        }
-        px.copy_from_slice(&self.shaded);
-        let r = self.rect.clamp_to(w, (px.len() as i32) / (w * 4));
-        if !r.is_empty() {
-            for y in r.top..r.bottom {
-                let a = ((y * w + r.left) * 4) as usize;
-                let b = ((y * w + r.right) * 4) as usize;
-                px[a..b].copy_from_slice(&self.bright[a..b]);
-                for x in [r.left, r.right - 1] {
-                    let i = ((y * w + x) * 4) as usize;
-                    px[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
-                }
-            }
-            for y in [r.top, r.bottom - 1] {
-                let a = ((y * w + r.left) * 4) as usize;
-                let b = ((y * w + r.right) * 4) as usize;
-                for p in px[a..b].as_chunks_mut::<4>().0 {
-                    *p = [255, 255, 255, 255];
-                }
-            }
-        }
-        let h = (px.len() as i32) / (w * 4);
-        let gap = (12.0 * self.scale).round() as i32;
-        if let Some(hint) = &self.hint {
-            hint.draw(px, w, h, ((w - hint.width) / 2, gap));
-        }
-        if !r.is_empty() {
-            let text = crate::core::tr!(
-                "region-size",
-                width = r.width().to_string(),
-                height = r.height().to_string()
-            );
-            if let Some(size) = Label::new(&text, self.scale) {
-                // Below the region's bottom-right corner, or inside it if there's no room.
-                let x = (r.right - size.width).max(0);
-                let below = r.bottom + gap / 2;
-                let y = if below + size.height <= h {
-                    below
-                } else {
-                    (r.bottom - size.height - gap / 2).max(0)
-                };
-                size.draw(px, w, h, (x, y));
-            }
-        }
-        let origin = self.origin;
-        if let Err(error) = self.layer.present(origin) {
-            tracing::warn!(%error, "couldn't show the selection");
-        }
-    }
-
-    /// Its monitor's size.
-    fn size(&self) -> (i32, i32) {
-        (self.width, self.height)
-    }
 }
 
 #[cfg(test)]
@@ -2016,44 +1594,6 @@ mod tests {
             .collect()
     }
 
-    /// Run alone (nextest gives each test its own process), the fonts aren't loaded yet: as on
-    /// a fresh start, when the tray's Capture a region… is the first thing done.
-    #[test]
-    fn the_hint_is_there_from_a_cold_start() {
-        crate::core::i18n::init("en");
-        let cold = !crate::core::text::has_fonts();
-        assert!(hint_label(1.0).is_some(), "cold start: {cold}");
-    }
-
-    #[test]
-    fn the_region_labels_are_white_text_on_a_dark_pill_clipped_to_the_screen() {
-        assert!(crate::fonts::ensure_loaded(), "Windows' text fonts");
-        crate::core::i18n::init("en");
-        let hint = Label::new(&crate::core::i18n::tr("region-hint"), 1.0).expect("a label");
-        assert!(
-            hint.width > 100 && hint.height >= 16,
-            "{}x{}",
-            hint.width,
-            hint.height
-        );
-        // Over a mid-grey screen, at its top-left and half off the right edge.
-        let (w, h) = (300, 60);
-        let mut px = [128u8, 128, 128, 255].repeat((w * h) as usize);
-        hint.draw(&mut px, w, h, (w - hint.width / 2, 10));
-        let at = |x: i32, y: i32| px[((y * w + x) * 4) as usize];
-        // Inside the pill: dark or white text (a glyph); outside it: the screen untouched.
-        let row: Vec<u8> = ((w - hint.width / 2)..w)
-            .map(|x| at(x, 10 + hint.height / 2))
-            .collect();
-        assert!(row.iter().any(|&v| v < 60), "the pill");
-        assert!(row.iter().any(|&v| v > 200), "white text");
-        assert_eq!(at(5, 5), 128);
-        assert_eq!(at(w - 1, h - 1), 128);
-        let size = crate::core::tr!("region-size", width = "640", height = "140");
-        assert!(size.contains("640") && size.contains("140"));
-        assert!(Label::new(&size, 1.5).is_some());
-    }
-
     #[test]
     fn typed_characters_beyond_the_bmp_arrive_whole() {
         let units: Vec<u16> = "A😀B中𝄞".encode_utf16().collect();
@@ -2100,87 +1640,8 @@ mod tests {
         assert_eq!(Command::from_wparam(99), None);
     }
 
-    use SelectionInput::{Down, Escape, Move, Up};
-
-    /// Two monitors: A (0) at 1920 × 1080 and B (1) at 2560 × 1440.
-    fn two_monitors() -> Chooser {
-        Chooser::new(vec![(1920, 1080), (2560, 1440)])
-    }
-
-    /// The selection opened with the cursor on monitor A (it has the keyboard); the drag is on
-    /// monitor B: the region is B's, in B's pixels, and A shows no rectangle.
-    #[test]
-    fn a_region_is_chosen_on_whichever_monitor_the_drag_starts_on() {
-        let mut c = two_monitors();
-        assert_eq!(c.input(1, Down(100, 200)), Choice::Going(Some(1)));
-        assert_eq!(c.input(1, Move(300, 260)), Choice::Going(Some(1)));
-        assert_eq!(c.rect(1), Rect::new(100, 200, 301, 261));
-        assert!(c.rect(0).is_empty());
-        assert_eq!(
-            c.input(1, Up(400, 300)),
-            Choice::Chosen {
-                screen: 1,
-                rect: Rect::new(100, 200, 401, 301)
-            }
-        );
-        // And on A, the cursor's monitor, as before.
-        let mut c = two_monitors();
-        c.input(0, Down(10, 10));
-        assert_eq!(
-            c.input(0, Up(50, 60)),
-            Choice::Chosen {
-                screen: 0,
-                rect: Rect::new(10, 10, 51, 61)
-            }
-        );
-    }
-
-    /// The mouse is captured by the window the drag began in, so a drag past its monitor's
-    /// edge goes on there in that monitor's pixels: the region stops at the edge.
-    #[test]
-    fn a_region_is_clipped_to_the_monitor_its_drag_began_on() {
-        let mut c = two_monitors();
-        c.input(0, Down(1800, 1000));
-        c.input(0, Move(2500, 1300));
-        assert_eq!(c.rect(0), Rect::new(1800, 1000, 1920, 1080));
-        assert_eq!(
-            c.input(0, Up(-50, 1200)),
-            Choice::Chosen {
-                screen: 0,
-                rect: Rect::new(0, 1000, 1801, 1080)
-            }
-        );
-    }
-
-    /// One drag at a time: another monitor's input meanwhile waits; a click alone chooses
-    /// nothing and choosing goes on; Esc on any monitor cancels.
-    #[test]
-    fn one_drag_at_a_time_and_esc_anywhere_cancels() {
-        let mut c = two_monitors();
-        c.input(1, Down(100, 100));
-        assert_eq!(c.input(0, Down(5, 5)), Choice::Going(None));
-        assert_eq!(c.input(0, Up(500, 500)), Choice::Going(None));
-        assert!(matches!(
-            c.input(1, Up(200, 200)),
-            Choice::Chosen { screen: 1, .. }
-        ));
-        let mut c = two_monitors();
-        c.input(0, Down(5, 5));
-        assert_eq!(c.input(0, Up(6, 7)), Choice::Going(Some(0)), "a click");
-        assert!(c.rect(0).is_empty());
-        // A lift or a move with no drag (its button went down elsewhere) does nothing.
-        assert_eq!(c.input(1, Up(9, 9)), Choice::Going(None));
-        assert_eq!(c.input(1, Move(9, 9)), Choice::Going(None));
-        assert_eq!(
-            c.input(5, Down(9, 9)),
-            Choice::Going(None),
-            "no such monitor"
-        );
-        assert_eq!(c.input(1, Escape), Choice::Cancelled);
-        let mut c = two_monitors();
-        c.input(1, Down(5, 5));
-        assert_eq!(c.input(0, Escape), Choice::Cancelled, "mid-drag, elsewhere");
-    }
+    use crate::region::SelectionInput::{Down, Escape, Move, Up};
+    use crate::region::two_monitors;
 
     fn pointer(screen: usize, phase: Phase) -> OverlayEvent {
         OverlayEvent::Pointer {
@@ -2290,12 +1751,6 @@ mod tests {
             delta: 120
         }));
         assert!(reaches_ink_while_choosing(&OverlayEvent::KeyUp(0x50)));
-    }
-
-    #[test]
-    fn a_selection_spans_its_corners_either_way() {
-        assert_eq!(span((10, 20), (5, 40)), Rect::new(5, 20, 11, 41));
-        assert_eq!(span((3, 3), (3, 3)), Rect::new(3, 3, 4, 4));
     }
 
     #[test]

@@ -596,7 +596,7 @@ loading, the documented writer and the safe save follow Replica's `settings.rs`.
 - **Sections:** `[general]` (start with Windows, the tray click, the hotkeys as text such as
   `"Win+Shift+D"`, Print Screen), `[drawing]` (default tool, a 9-colour palette, the default
   colour, the dim, disappearing ink, the laser trail) with `[drawing.widths]` per tool,
-  `[capture]`, `[advanced]` (check for updates and diagnostic logging, both off) and `[toolbar.positions]` (keyed by the
+  `[capture]`, `[recording]` (videos: see Recording), `[advanced]` (check for updates and diagnostic logging, both off) and `[toolbar.positions]` (keyed by the
   platform's monitor id).
 - **Every key is documented:** `Settings::save` writes `to_documented_toml()`, a comment above
   each key giving what it does, its values and its default. `docs/settings.example.toml` is the
@@ -1572,3 +1572,107 @@ recorded 4.07 s in 6.42 s.
   tested with a source that fails), Windows' Media Player app itself (it plays through Media
   Foundation, whose reader and decoder are checked), Windows 10 and an N edition.
   The engine uses nothing that Windows 10 2004 lacks.
+
+### Recording while annotating
+
+The drawing layer's own recording (`overmark::app::recording`): the toolbar's **Record** (one
+button, no key, greyed out while a box is open), then the box chosen exactly as Save a region
+chooses one, then an outline and a control bar on the box while you go on drawing. The video has
+the drawing in it, with no setting, because Desktop Duplication sees the ink layer; the outline,
+the bar, the toolbar, the dim and the notice are excluded from capture, so it never has those.
+
+**The parts the screen-capture mode shares** (they know nothing of the drawing layer):
+
+- **`overmark_win::region::Picker`**: choosing a box, moved out of the overlay. A selection
+  window over each monitor shows a still image of it darkened, the box being dragged bright, the
+  hint and the size. A drag stays on its monitor; Esc cancels; `poll` gives `Picked`. The overlay
+  opens it over its composed images (and sifts the layers' events while it's up, as before); a
+  mode without the layer opens it over plain grabs.
+- **`overmark_win::region::Outline`**: four thin windows round the box (`outline_strips`,
+  tested): each just outside its edge, or just inside where outside would be off the monitor (a
+  full-screen box). Click-through, never activated, excluded from capture. White before
+  recording, red while recording, amber paused. Four strips rather than one window over the
+  box: a full-screen box would otherwise need a 14 MB surface for a 2-pixel frame.
+- **`overmark::record_bar`**: the bar (`show`, tested with egui_kittest through AccessKit), its
+  window (`Bar`) and `RecordBox`, which holds the outline, the bar and the `Recording` and gives
+  `BarAction`s. The bar is the toolbar's kind of window: egui drawn on the CPU (`toolbar::draw_frame`,
+  now shared, through `raster`) into a `Panel`, excluded from capture, never activated, solid
+  only where it's drawn, read by screen readers (its title `window-record-bar-name`, each
+  control named). It has an egui context of its own, so the toolbar's state and its never
+  meet. It redraws once a second while recording, for the timer (`core::record::timer_text`).
+- **Placement** (`core::record::bar_origin`, tested): always on the box's top edge, just above
+  it when it fits on the monitor, just inside it when it doesn't; at the box's left edge,
+  overhanging a narrower box to the right, moved left only to stay on the monitor. Never at the
+  bottom. **It's the visible bar that's placed**, as egui laid it out in the last frame
+  (`record_bar::bar_rect`), not the window round it, which is wider for the widest state (the
+  question) and its shadow, and transparent: so a narrow box at the monitor's right edge has the
+  bar over its top edge, not beside it. A state of another width (the question) places it again;
+  the window's transparent rest may go past the monitor's edge. Tested from the rendered bounds
+  of every state at 100 and 150 %.
+
+**The bar's states:** before recording, Record, the timer at 0:00, ✕ (cancels the box, without
+asking: nothing is recorded) and Stop greyed out. Recording: Pause, Stop, the timer (a red dot)
+and ✕. Paused: Resume in Pause's place (an amber dot). **✕ on a recording asks in the bar
+itself**, "Discard this recording?" with Discard and Keep, not in a dialog: no window takes the
+focus, and the drawing goes on. Stop saves; there's no separate Save.
+
+**The flow** (`app::recording`): Record → `capture(SaveRegion)` with `pending_record`, so the
+selection shows the screen with the drawing; the chosen box is placed by `core::record::place`
+(one monitor, even sides; refused plainly otherwise) and opened as a `RecordBox`. The bar's
+Record starts the engine into the captures folder, named by the capture pattern with `.mp4`
+(`file_name::capture_path`); its settings come from `[recording]`. Stop saves and shows the
+notice (`toast-recording-saved`; click opens the video, right-click its folder). Errors are said
+plainly (`toast-recording-failed` with the engine's message). **Esc before recording cancels the
+box and leaves the layer open; closing the layer while recording (Esc, Close, the hotkey, the
+tray) stops and saves first** (`App::close` calls `finish_recording`): closing never loses a
+recording. A recording that ends by itself (a lock, an unplugged monitor) wakes the tray's loop
+(`WAKE_RECORDING`, from the engine's thread through the tray's `Waker`), and is saved and told
+with its reason. When an ink layer is activated, the toolbar is raised and the box's outline
+and bar over it.
+
+**Settings:** `[recording]`, documented in `settings.toml`: `frame_rate` (15, 24 or 30; anything
+else is taken to the nearest, with a warning), `quality` (`small`, `balanced`, `sharp`),
+`pointer`, `encoder` (`automatic`: the GPU's encoder when it takes the video, else the software
+one; `software`: always the software one, smaller still recordings and more CPU, as measured
+under Sizes). In the Settings window on the Capture page. Older settings files load with the
+defaults (the released fixtures).
+
+**Checked:**
+
+- **Unit tests:** the bar's placement (room above, a box at the monitor's top, full screen,
+  narrower than the bar, at the right edge, a short monitor); the outline's strips (outside,
+  inside for a full-screen box and at a corner); the timer's text; `[recording]`'s defaults, its
+  parse and a frame rate taken to the nearest; the moved selection's tests; the outline's real
+  windows (excluded, click-through, never activated, the foreground unchanged); the bar's states
+  and what each control asks for, the question, and that every state fits its window; the
+  visible bar's place from its rendered bounds in every state at 100 and 150 % (room above,
+  full screen, a narrow box at the right edge, a narrow box with room); with activation off,
+  nothing takes the foreground.
+- **Pictures:** `cargo run -p overmark --release --example record_bar_shot -- <folder>` draws the
+  bar's four states at 100 and 150 % (the window is excluded from capture: no screenshot shows
+  it).
+- **The real exe:** `cargo run -p overmark --release --example record_annotate_check`, with
+  temp `%APPDATA%` and captures folders and `--test-drawing` over backdrops of a known colour.
+  **Nothing takes the user's foreground:** the app runs with `--no-activate`
+  (`window::never_activate`: every window it makes is `WS_EX_NOACTIVATE`, and `show`, `focus`
+  and `give_focus_back` never activate anything; the layer then has no keyboard of its own, so
+  the check posts its keys, Esc, to the ink layer) and `--no-grabber` (no helper process), and the
+  check itself activates nothing. It checks the foreground after every step, not only at the
+  end. Record on the toolbar and the bar's buttons are pressed through UI Automation on the
+  app's own windows; the box is dragged with mouse messages posted to its selection window;
+  nothing global. A box round the strokes: record, pause, resume, stop; the MP4 has the strokes
+  and is as long as the time recorded less the pause, and the notice shows; the visible bar (its
+  controls' bounds) is just above the box at its left edge. A full-screen box: the bar inside its
+  top edge, and the bar's and the outline's places in the video are the backdrop under them.
+  Esc before recording cancels the box and the layer stays; Discard asks, then leaves no file;
+  Esc while recording saves, then closes. No partial file is left. It refuses to run beside a
+  running Overmark, and stops the app it started however it ends.
+  Run on 7 Nov 2026 (one 2560x1440 monitor at 100 %): 12 of 12, the foreground the user's own
+  window at every step. The box's video, 680 x 160, 2.53 s recorded with the 1 s pause left out,
+  had the pen stroke at (98, 50, 150) for (99, 49, 152) and the backdrop between the strokes; the
+  bar's controls were 11 pixels above the box, from its left edge; under the full-screen box's
+  bar and outline the video had the backdrop, (198, 101, 50).
+- **Reading a video back** (`mf::decode_frame_at`, for the checks): Windows' decoder pads a frame
+  to whole 16-pixel blocks (680 x 162 comes as 688 x 176), so rows are read at the padded pitch;
+  tested with an unaligned width (`an_unaligned_width_decodes_back_in_place`). The first run of
+  the check read them at 680 and saw no stroke: the video had it, as Edge showed.

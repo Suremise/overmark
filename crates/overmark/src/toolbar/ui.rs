@@ -37,6 +37,9 @@ pub struct State {
     pub disappearing_ink: bool,
     /// Settings' "Right-click undoes": the undo button's tooltip says so.
     pub right_click_undoes: bool,
+    /// A box to record is up (chosen, recording or paused): Record is greyed out until it
+    /// goes.
+    pub recording: bool,
 }
 
 /// What a control asks for.
@@ -61,6 +64,8 @@ pub enum Action {
     /// The current tool's width from the width slider (Settings' pixels), as holding the
     /// tool's key and scrolling sets it.
     Width(f32),
+    /// Record a video of a box on the screen: choose the box, then the bar on its edge.
+    Record,
 }
 
 /// Where the grip was drawn last frame (points), kept in egui's memory under this id: a press
@@ -83,12 +88,12 @@ fn tool_name(t: ToolKind) -> String {
     tr(&format!("tool-{}", t.as_str()))
 }
 
-const BUTTON: f32 = 30.0;
+pub(crate) const BUTTON: f32 = 30.0;
 /// Room round the toolbar inside its window: its frame's margins, border and shadow.
 const MARGIN: f32 = 40.0;
 
 /// An icon button: `name` is what a screen reader reads, `tip` the hover text with its key.
-fn button(
+pub(crate) fn button(
     ui: &mut Ui,
     paint: impl FnOnce(&egui::Painter, egui::Rect, Color32),
     name: &str,
@@ -231,15 +236,15 @@ fn freeze_button(ui: &mut Ui, g: Glyph, name: &str, tip: &str, backdrop: Backdro
     response.on_hover_text(tip).on_disabled_hover_text(tip)
 }
 
-fn glyph(g: Glyph) -> impl FnOnce(&egui::Painter, egui::Rect, Color32) {
+pub(crate) fn glyph(g: Glyph) -> impl FnOnce(&egui::Painter, egui::Rect, Color32) {
     move |p, r, c| g.paint(p, r, c)
 }
 
-fn icon(i: Icon) -> impl FnOnce(&egui::Painter, egui::Rect, Color32) {
+pub(crate) fn icon(i: Icon) -> impl FnOnce(&egui::Painter, egui::Rect, Color32) {
     move |p, r, c| i.paint(p, r, c)
 }
 
-fn separator(ui: &mut Ui) {
+pub(crate) fn separator(ui: &mut Ui) {
     let p = theme::of(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(1.0, BUTTON - 8.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, p.border);
@@ -251,7 +256,7 @@ fn colour32(c: Colour) -> Color32 {
 
 /// The toolbar's frame (the shared look): the card colour, its border and a soft shadow; a pill
 /// when `round`.
-fn panel_frame(p: &theme::Palette, round: bool) -> egui::Frame {
+pub(crate) fn panel_frame(p: &theme::Palette, round: bool) -> egui::Frame {
     egui::Frame::new()
         .fill(p.card)
         .stroke(Stroke::new(1.0, p.border))
@@ -520,6 +525,16 @@ fn expanded(ui: &mut Ui, state: &State, actions: &mut Vec<Action>) {
         actions.push(Action::Capture(Command::Copy));
     }
     more_menu(ui, actions);
+    ui.add_enabled_ui(!state.recording, |ui| {
+        let tip = if state.recording {
+            tr("toolbar-record-busy-tooltip")
+        } else {
+            tr("toolbar-record-tooltip")
+        };
+        if button(ui, glyph(Glyph::Record), &tr("toolbar-record"), &tip).clicked() {
+            actions.push(Action::Record);
+        }
+    });
     // Freeze as a media control: pause in Live, play while
     // frozen, greyed out on the boards; the snowflake is the Frozen backdrop's alone.
     let (g, name, tip) = match state.backdrop {
@@ -1115,6 +1130,7 @@ mod tests {
             collapsed: false,
             disappearing_ink: false,
             right_click_undoes: true,
+            recording: false,
         }
     }
 

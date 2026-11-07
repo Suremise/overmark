@@ -103,6 +103,22 @@ fn register_class() {
     });
 }
 
+/// Whether this process's windows must never be activated ([`never_activate`]).
+static NEVER_ACTIVATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// From now on no window of this process takes the foreground: every window is made
+/// `WS_EX_NOACTIVATE`, [`Window::show`] never activates, [`Window::focus`] and
+/// [`give_focus_back`] do nothing. For checks that drive the real app (`--no-activate`): they post
+/// their keys and clicks to its windows, and the user's foreground is never touched.
+pub fn never_activate() {
+    NEVER_ACTIVATE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether [`never_activate`] was asked for.
+pub fn activation_off() -> bool {
+    NEVER_ACTIVATE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// A top-most, borderless popup window, destroyed when dropped.
 pub struct Window {
     hwnd: HWND,
@@ -123,7 +139,7 @@ impl Window {
             // Click-through needs WS_EX_LAYERED too.
             ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
         }
-        if options.no_activate {
+        if options.no_activate || activation_off() {
             ex |= WS_EX_NOACTIVATE;
         }
         let boxed: *mut Handler = Box::into_raw(Box::new(handler));
@@ -222,8 +238,10 @@ impl Window {
         unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd) }
     }
 
-    /// Shows the window, taking the focus only if `activate`.
+    /// Shows the window, taking the focus only if `activate` (never after
+    /// [`never_activate`]).
     pub fn show(&self, activate: bool) {
+        let activate = activate && !activation_off();
         // SAFETY: our own window.
         unsafe {
             let _ = ShowWindow(
@@ -249,6 +267,13 @@ impl Window {
     }
 }
 
+/// `hwnd`'s extended style bits (`WS_EX_*`), for tests and checks.
+pub fn ex_style(hwnd: HWND) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW};
+    // SAFETY: a plain query; Windows checks the handle.
+    unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 }
+}
+
 impl Window {
     /// Puts the window just below `above` in the z-order (both top-most), without activating.
     pub fn place_below(&self, above: HWND) {
@@ -271,6 +296,9 @@ impl Window {
     /// of our hotkeys, or when the launch that asked for it gave us the right
     /// (`AllowSetForegroundWindow`); otherwise the window flashes in the taskbar instead.
     pub fn focus(&self) -> bool {
+        if activation_off() {
+            return false;
+        }
         use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
         use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
         // SAFETY: our own window.
@@ -533,6 +561,9 @@ impl std::fmt::Display for Named {
 /// there. Windows allows it while this process is in the foreground, as it is when the layer
 /// closes.
 pub fn give_focus_back(hwnd: HWND) -> bool {
+    if activation_off() {
+        return false;
+    }
     use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
     // SAFETY: IsWindow is safe for any handle; SetForegroundWindow takes a live one.
     unsafe { IsWindow(Some(hwnd)).as_bool() && SetForegroundWindow(hwnd).as_bool() }
@@ -580,7 +611,7 @@ pub fn wait_for_message(timeout_ms: u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::title;
+    use super::*;
     use crate::core::i18n::tr;
 
     /// A window's title is its Fluent string, made once (none is written in the code).
@@ -622,5 +653,30 @@ mod tests {
         assert_eq!(describe(None), "none");
         assert_eq!(super::Named(Some(desktop)).to_string(), named);
         assert_eq!(super::Named(None).to_string(), "none");
+    }
+
+    /// With activation off (as `--no-activate` sets it, for checks that drive the real app), a
+    /// window asked to show itself active, or to take the focus, doesn't, and says it can't be
+    /// activated. nextest runs each test in a process of its own, so the switch stays here.
+    #[test]
+    fn with_activation_off_nothing_takes_the_foreground() {
+        use windows::Win32::UI::WindowsAndMessaging::WS_EX_NOACTIVATE;
+        let before = foreground();
+        never_activate();
+        let w = Window::new(
+            Rect::new(-30_000, -30_000, -29_900, -29_900),
+            Options {
+                layered: true,
+                title: Some("Overmark test"),
+                ..Default::default()
+            },
+            Box::new(|_, _, _, _| None),
+        )
+        .expect("a window");
+        assert!(ex_style(w.hwnd()) & WS_EX_NOACTIVATE.0 != 0);
+        w.show(true);
+        assert!(!w.focus(), "focus did nothing");
+        assert!(!give_focus_back(w.hwnd()));
+        assert_eq!(foreground(), before, "nothing took the foreground");
     }
 }

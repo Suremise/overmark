@@ -17,3 +17,8 @@ toast-capture-failed = The screen couldn't be captured: { $reason }
 # Overmark couldn't get a picture of the screen without its own windows on it.
 toast-capture-no-image = The screen couldn't be captured: Overmark couldn't get a clean picture of it.
 toast-open-failed = { $file } couldn't be opened: { $reason }
+
+## After a recording. $file: the video's full path; $reason: what went wrong.
+
+toast-recording-saved = Recording saved to { $file }
+toast-recording-failed = The recording couldn't be made: { $reason }

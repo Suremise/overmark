@@ -12,6 +12,9 @@ pub mod config;
 #[cfg(windows)]
 mod ink;
 pub mod input;
+/// The record box's outline and control bar.
+#[cfg(windows)]
+pub mod record_bar;
 /// The Settings window, a process of its own (`--settings`).
 #[cfg(windows)]
 pub mod settings_window;
