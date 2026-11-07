@@ -28,6 +28,7 @@ pub static LOCALES: &[Locale] = &[Locale {
         ftl!("en", "hotkeys.ftl"),
         ftl!("en", "errors.ftl"),
         ftl!("en", "installer.ftl"),
+        ftl!("en", "recording.ftl"),
     ],
 }];
 

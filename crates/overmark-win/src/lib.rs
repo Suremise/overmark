@@ -23,6 +23,8 @@ pub mod overlay;
 #[cfg(windows)]
 pub mod paths;
 #[cfg(windows)]
+pub mod record;
+#[cfg(windows)]
 pub mod save;
 #[cfg(windows)]
 pub mod update;

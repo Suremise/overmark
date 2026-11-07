@@ -74,6 +74,27 @@ pub fn unrotate(texture: &Frame, rotation: Rotation) -> Frame {
     }
 }
 
+/// Where `area` of a monitor's desktop (`width` x `height`, in the desktop's orientation) is in
+/// its duplicated, unturned texture: the rectangle that [`unrotate`] turns back into `area`,
+/// by the same mapping. `area` is cut to the desktop first.
+pub fn texture_area(area: super::Rect, rotation: Rotation, width: i32, height: i32) -> super::Rect {
+    use super::Rect;
+    let a = area.clamp_to(width, height);
+    match rotation {
+        Rotation::None => a,
+        // Desktop (x, y) is texture (y, W - 1 - x).
+        Rotation::Rotate90 => Rect::new(a.top, width - a.right, a.bottom, width - a.left),
+        Rotation::Rotate180 => Rect::new(
+            width - a.right,
+            height - a.bottom,
+            width - a.left,
+            height - a.top,
+        ),
+        // Desktop (x, y) is texture (H - 1 - y, x).
+        Rotation::Rotate270 => Rect::new(height - a.bottom, a.left, height - a.top, a.right),
+    }
+}
+
 /// Whether two BGRA pixels match within `tolerance` per colour channel (alpha ignored).
 pub fn close(a: [u8; 4], b: [u8; 4], tolerance: u8) -> bool {
     (0..3).all(|i| a[i].abs_diff(b[i]) <= tolerance)
@@ -196,6 +217,46 @@ mod tests {
             a.sort();
             b.sort();
             assert_eq!(a, b, "{r:?} lost or doubled a pixel");
+        }
+    }
+
+    /// `rect` of `frame`, copied out.
+    fn crop(frame: &Frame, rect: crate::win32::Rect) -> Frame {
+        let mut bgra = Vec::new();
+        for y in rect.top..rect.bottom {
+            for x in rect.left..rect.right {
+                bgra.extend_from_slice(&frame.pixel(x, y));
+            }
+        }
+        Frame {
+            width: rect.width(),
+            height: rect.height(),
+            bgra,
+        }
+    }
+
+    #[test]
+    fn texture_area_turned_back_is_the_desktops_area() {
+        use crate::win32::Rect;
+        // A 4x6 texture: for 90 and 270, a 6x4 desktop.
+        let texture = numbered(4, 6);
+        for rotation in [
+            Rotation::None,
+            Rotation::Rotate90,
+            Rotation::Rotate180,
+            Rotation::Rotate270,
+        ] {
+            let desktop = unrotate(&texture, rotation);
+            let (w, h) = (desktop.width, desktop.height);
+            let area = Rect::new(1, 1, w - 1, h - 2);
+            let in_texture = texture_area(area, rotation, w, h);
+            let read = unrotate(&crop(&texture, in_texture), rotation);
+            let expected = crop(&desktop, area);
+            assert_eq!(
+                (read.width, read.height, &read.bgra),
+                (expected.width, expected.height, &expected.bgra),
+                "{rotation:?}"
+            );
         }
     }
 

@@ -31,7 +31,9 @@ cargo nextest run -p overmark-win -E 'binary(hotkeys)'
 
 **The full suite should stay under 60 seconds** (the build aside). A test that needs longer, or
 repeats something many times to catch a rare race, is marked `#[ignore = "stress: …"]` with a
-quick version in the default run, and run by hand with `--run-ignored only`.
+quick version in the default run, and run by hand with `--run-ignored only`. Measurements for
+the docs are ignored the same way, `#[ignore = "measure: …"]`, and run in release (the recording
+sizes: docs/ARCHITECTURE.md, Recording).
 
 **The core is platform-free:** `cargo test -p overmark-core` passes on Linux too (CI's Linux job
 runs it).

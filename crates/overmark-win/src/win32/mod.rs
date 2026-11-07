@@ -10,6 +10,7 @@
 //! - [`capture`]: DXGI Desktop Duplication (saves, frozen frames) and Windows Graphics Capture
 //!   (an observer, as a Teams or Zoom share sees the screen);
 //! - [`magnifier`]: a clean grab without our windows, which never leave the screen;
+//! - [`mf`]: Media Foundation, loaded at run time: H.264 into an MP4, and reading one back;
 //! - [`pointer`]: mouse, pen and touch through `WM_POINTER*` (no hooks);
 //! - [`tray`]: the notification-area icon, its menu and balloons, and one instance per session;
 //! - [`registry`]: values under `HKEY_CURRENT_USER` (the taskbar's theme, Start with Windows);
@@ -30,6 +31,7 @@ pub mod known_folders;
 pub mod language;
 pub mod layered;
 pub mod magnifier;
+pub mod mf;
 pub mod panel;
 pub mod pointer;
 pub mod process;

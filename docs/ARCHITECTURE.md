@@ -77,6 +77,9 @@ a crate is added there only when the code needs it. The toolchain is pinned in
   `MsgWaitForMultipleObjectsEx` with no timeout, and makes the layers when a hotkey comes (see
   The resident app).
 - **Per-monitor DPI awareness v2:** every layer is sized in physical pixels (see DPI).
+- **Recording: Desktop Duplication into Media Foundation's H.264 encoder**, the GPU's or
+  Microsoft's software one, writing an MP4; Media Foundation loaded at run time so Windows N
+  editions still start, and no new crate (see Recording).
 
 ## The ink-layer spike
 
@@ -1416,3 +1419,156 @@ release's tag, which `overmark_core::update` compares with this version. A newer
 balloon that opens its page. Nothing is downloaded; with it off, nothing in Overmark touches the
 network: `win32::http` is the only code that can, and only `update::check_latest` calls it,
 which only runs when the setting is on.
+
+## Recording
+
+Recording a box on the screen to a small MP4: the engine both recording modes drive, recording
+while annotating (the drawing is on the screen, so it's in the video) and screen capture (no
+drawing layer). No audio. `overmark_win::record`, with its platform-free half in
+`overmark_core::record`.
+
+**The API** (`record::Recording`): `start(Start { area, settings, path, encoder }, on_end)`
+returns once the first image is in, or with why it can't record; then `pause`, `resume`,
+`elapsed` (the time recorded), `status` (Recording, Paused or Ended), `ended_by` (why it ended
+by itself), `stop` (saves; gives the path, length, frames, bytes, box and encoder) and `discard`
+(deletes the file). Dropping a recording stops and saves it. A recording that ends by itself
+saves what it had and calls `on_end` (from its own thread: post a message to a window there);
+`stop` then gives the file with `ended_by` set. Errors are `RecordError`, each with a message in
+the user's language (`locales/en/recording.ftl`).
+
+**The box** (`core::record::place`, tested): physical pixels on the virtual desktop. A box on
+two monitors is refused, plainly, not stitched (`record-error-two-monitors`); one on no monitor
+too. Otherwise it's cut to its monitor, and its width and height are rounded down to even
+numbers, keeping its top-left, as H.264's 4:2:0 chroma needs. Each side needs at least
+`MIN_SIDE` (34) pixels: Microsoft's software encoder refuses a side of 32 or less (measured:
+48x48, 34x34 and 66x50 are taken; 32x32, 96x32 and 128x16 aren't). Its largest frame is
+36,864 macroblocks (4096x2304, H.264 level 5.1); NVIDIA's takes 4096x2304 but not 7680x4320. A
+size the encoder refuses is said with its reason (`record-error-encoder-refused`).
+
+**How it records** (one thread per recording, `overmark-record`):
+
+1. **Frames from Desktop Duplication** (`capture::dd::Duplication::next_change`), which sees
+   the ink and the frozen backdrop and leaves out every window excluded from capture: the record
+   controls never show, and the drawing needs nothing extra. The box is copied out of the
+   monitor's frame on the GPU (`CopySubresourceRegion` into a staging texture the box's size,
+   kept between frames) and read back. On a turned monitor the box is found in the unturned
+   texture (`capture::texture_area`, tested) and turned back.
+2. **A frame each tick.** Desktop Duplication gives a frame only when the screen changes, so the
+   thread writes one every 1/15, 1/24 or 1/30 s from the latest image: the file plays at a
+   constant rate, and a still screen repeats one buffer, which costs almost nothing to encode or
+   store. If the PC stalls for more than a second, the gap is one long frame, not a burst.
+3. **Timestamps from real time** (the performance counter): frame `n` is at `n / fps` seconds of
+   recorded time (`core::record::frame_time`, exact at 15 fps too). **A pause** stops the
+   recorded clock (`core::record::Clock`): the paused time is taken off every later time, so
+   the video has neither a gap nor a frozen stretch. While paused the thread sleeps.
+4. **The pointer drawn in** from Desktop Duplication's shape and position
+   (`core::record::pointer::draw`, tested): colour shapes blended by alpha, masked-colour ones
+   replacing or inverting, and monochrome ones by their AND and XOR masks, as Windows draws
+   them. `RecordSettings::pointer = false` leaves it out. On the real screen the arrow lands on
+   `GetCursorPos`, its tip at its top-left.
+5. **BGRA to NV12 on the CPU** (`core::record::nv12`, tested): BT.709 in limited range, as both
+   media types say, so players show the colours as they were (a round trip through the encoder
+   and Windows' decoder is within 8 levels in the tests). Only frames that changed are
+   converted.
+6. **H.264 into an MP4** through Media Foundation's sink writer (`win32::mf::Mp4Writer`), to
+   `<name>.mp4.part` until it's finished, then renamed (a taken name gets ` (2)`). The partial
+   file is made with `create_new` before anything else (`<name>.mp4.2.part` and so on if one is
+   there), so a recording only ever replaces or deletes its own, never another recording's or
+   one left from a failed finish. High profile,
+   no B-frames, the index (`moov`) at the end as Media Foundation writes it. (Its option to put
+   the index first left stale bytes between the index and the video, which its own reader then
+   refused, so it isn't used.) **The encoder** is the GPU's (NVENC, Quick Sync, AMD's) when the
+   sink writer may use hardware transforms and it takes the size, else Microsoft's software
+   encoder, tried in that order: on this PC a 48x48 box falls back to software and 800x600 gets
+   NVENC.
+
+**Media Foundation is loaded at run time** (`win32::mf`): Windows N and KN editions have none
+until the Media Feature Pack is installed, and the `windows` crate puts each function it calls
+into the exe's import table, so an exe that called `MFStartup` directly wouldn't start there at
+all. The few free functions used come from `GetProcAddress` on `mfplat.dll` and
+`mfreadwrite.dll` (from System32 only); everything else is COM methods. Without it, Overmark
+runs, and recording says how to get it (`record-error-no-media-foundation`).
+
+**Failing plainly:** the screen lost while recording (the secure desktop, a lock, a display mode
+change, an unplugged monitor: Desktop Duplication's `DXGI_ERROR_ACCESS_LOST` and the like) ends
+the recording and saves what it had (`record-error-capture-lost`); so does an encoder that fails
+part way (`record-error-encoding`). A duplication that can't start says why
+(`record-error-capture-unavailable`). Discarding deletes the `.part`.
+
+**Frame rate and quality** (`RecordSettings`, defaults 15 fps and Balanced): 15, 24 or 30 fps;
+Small, Balanced or Sharp is a bitrate that grows with the box's area and the rate
+(`core::record::bitrate`: 0.04, 0.07 and 0.12 bits a pixel a frame, kept between 0.25 and
+40 Mbit/s): the encoder's average, with a peak of twice that.
+
+**Rate control: a capped variable bitrate** (`eAVEncCommonRateControlMode_PeakConstrainedVBR`),
+not a constant one. A constant bitrate may pad (some encoders write filler to hold the rate)
+and can't let a busy moment borrow from the still ones; capped VBR spends what the picture
+needs, up to the peak. Measured, neither encoder here padded in CBR (the table's last column),
+so the choice guards against the encoders that do. **What keeps a still screen small is the key
+frames:** each is a whole picture, and a still minute is nearly all key frames. There's one every
+30 s (`KEY_FRAME_SECS`): a still full screen took 8.3 MB a minute with one every 10 s, 3.0 MB at
+30 s and 1.6 MB at 60 s (software encoder, the scene below). Players seek to the key frame
+before and decode forward, which is quick through repeated frames. Quality-based VBR (quality
+50) was about half the size again on still screens, but its scale means something different to
+each encoder and doesn't follow the box's area, so it isn't used.
+
+### Sizes
+
+Measured on 7 Nov 2026 on one PC (an NVIDIA GeForce RTX 5070 Ti, Windows 11, one 2560x1440
+monitor at 165 Hz), 15 fps, a minute each.
+
+**A known scene** (`record/measure.rs`, made frame by frame and encoded as the engine does, with
+no screen): a desktop of text that never changes, and a Task Manager window (800 x 600) whose
+graph scrolls and numbers change once a second. MB a minute:
+
+| Box | Encoder | Small | Balanced | Sharp | Balanced, still | Balanced, CBR |
+|---|---|---|---|---|---|---|
+| 800 x 600 (Task Manager) | software | 0.59 | 0.60 | 0.61 | 0.44 | 0.63 |
+| 800 x 600 (Task Manager) | NVIDIA H.264 Encoder MFT | 0.70 | 0.70 | 0.83 | 0.61 | 0.72 |
+| 1280 x 1440 (half) | software | 1.65 | 1.66 | 1.67 | 1.50 | 1.68 |
+| 1280 x 1440 (half) | NVIDIA H.264 Encoder MFT | 2.04 | 2.06 | 2.36 | 1.98 | 2.14 |
+| 2560 x 1440 (full) | software | 3.11 | 3.11 | 3.12 | 2.95 | 3.12 |
+| 2560 x 1440 (full) | NVIDIA H.264 Encoder MFT | 3.89 | 3.98 | 4.45 | 3.90 | 3.97 |
+
+The quality hardly changes a mostly still screen: the encoder needs far less than the average
+it's allowed. It caps busy ones. With all of 1280 x 1440 scrolling every frame: Small 7.70,
+Balanced 7.98, Sharp 8.05 MB a minute in software; 6.90, 7.38 and 8.11 with NVENC.
+
+**The real screen** (`cargo run -p overmark-win --release --example record_check -- --seconds
+60`: Desktop Duplication with the pointer and the hardware encoder, with whatever was on the
+screen while it ran):
+
+| Box | Recorded | MB a minute |
+|---|---|---|
+| 800 x 600 at (100, 100) | 60.07 s, 901 frames, NVENC | 1.76 |
+| 1280 x 1440 (the left half) | 60.07 s, 901 frames, NVENC | 8.19 |
+| 2560 x 1440 (the whole screen) | 60.07 s, 901 frames, NVENC | 17.44 |
+
+The screen was in use while it ran (a terminal and a progress panel updating as builds ran), so
+the half and whole screen were busy, not still: the known scene is the still case. The small box
+is inside the target of 1 to 3 MB a minute for a small, mostly still box. A run with a 2 s pause
+recorded 4.07 s in 6.42 s.
+
+### Checked
+
+- **Unit tests** in core: the box's placement and the two-monitor refusal, even sizes, frame
+  times and counts at every rate, the pause offset, the bitrate mapping, NV12, the pointer
+  shapes, and every error's message.
+- **The engine** (`record/tests.rs`): the real thread, clock and software encoder with a test
+  pattern for a screen. A recording's frame count, duration and size from the file read back
+  with Media Foundation; its colours decoded back; a pause leaving no gap; discard leaving
+  nothing; a lost screen ending the recording and keeping a playable file; a size the encoder
+  refuses; a box on no monitor; a failed start or a discard leaving another recording's partial
+  file alone; pause and resume doing nothing once a recording has ended.
+- **In a browser:** a clip of the test pattern through the engine and NVENC
+  (`write_a_sample_clip`, ignored: it writes to `OVERMARK_SAMPLE_CLIP`) in a `<video>` in
+  headless Edge (no window), seeked to 1.5 s and drawn to a canvas: duration 3.067 s, 640x360,
+  and the pattern's colour (200, 100, 50) exactly.
+- **The real screen** (`record_check`): each box records and reads back with Media
+  Foundation's own reader and decoder (what Windows' players use), the pause is left out, and
+  the pointer lands where `GetCursorPos` says. It makes no window and sends no input.
+- **Not checked here:** two monitors (one 2560x1440 at 100 % here; the box's placement is
+  tested with two), a turned monitor, a lock or display change while recording (the path is
+  tested with a source that fails), Windows' Media Player app itself (it plays through Media
+  Foundation, whose reader and decoder are checked), Windows 10 and an N edition.
+  The engine uses nothing that Windows 10 2004 lacks.

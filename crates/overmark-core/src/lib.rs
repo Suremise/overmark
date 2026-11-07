@@ -14,6 +14,7 @@ pub mod hotkey_status;
 pub mod i18n;
 pub mod laser;
 pub mod pen;
+pub mod record;
 pub mod render;
 pub mod session;
 pub mod settings;
