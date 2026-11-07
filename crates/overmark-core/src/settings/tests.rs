@@ -503,6 +503,8 @@ const RELEASED: &[(&str, &str)] = &[
     ("0.2.0-changed", include_str!("released/0.2.0-changed.toml")),
     ("0.2.1-default", include_str!("released/0.2.1-default.toml")),
     ("0.2.1-changed", include_str!("released/0.2.1-changed.toml")),
+    ("0.3.0-default", include_str!("released/0.3.0-default.toml")),
+    ("0.3.0-changed", include_str!("released/0.3.0-changed.toml")),
 ];
 
 /// Every key `old` sets is in `new` with the same value. (`new` is the file as this version
@@ -584,6 +586,17 @@ fn every_released_versions_settings_load_and_keep_their_values() {
     for (name, text) in &RELEASED[..4] {
         assert!(!text.contains("diagnostic_logging"), "{name}");
         assert!(!parse(text).settings.advanced.diagnostic_logging, "{name}");
+    }
+    // Before 0.3.0 there was no recording: each file, changed ones too, takes its defaults and
+    // the Record a region hotkey's.
+    for (name, text) in &RELEASED[..6] {
+        assert!(!text.contains("[recording]"), "{name}");
+        let s = parse(text).settings;
+        assert_eq!(s.recording, Settings::default().recording, "{name}");
+        assert_eq!(
+            s.general.hotkey_record_region, DEFAULT_RECORD_REGION_HOTKEY,
+            "{name}"
+        );
     }
     // 0.1.0 had no right-click undo or Capture a region hotkey: either file takes the defaults.
     for (name, text) in &RELEASED[..2] {

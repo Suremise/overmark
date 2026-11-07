@@ -6,21 +6,38 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-07
+
+Record a part of the screen to a small MP4 video, while you draw on it or while you use your
+apps.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the exe
+("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt` first
+(`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with it), and
+if it matches, choose **More info**, then **Run anyway**. Installing it over 0.2.1 keeps your
+settings.
+
 ### Added
 
-- **Record a video** of part of the screen with your drawing: Record on the toolbar, drag a box,
-  then record, pause, stop or discard from the small bar on the box's edge. Videos are small
-  MP4s, saved in the captures folder with the usual notice; there's no sound. Closing the layer
-  while recording saves first. Settings › Capture › Recording sets the frame rate, the quality,
-  the mouse pointer and the encoder.
+- **Record a video** of part of the screen with your drawing in it: Record on the toolbar, drag
+  a box, then record, pause, stop or discard from the small bar on the box's edge, and go on
+  drawing while it records. Videos are small MP4s, saved in the captures folder with the usual
+  notice; there's no sound, and the outline, the bar and the toolbar are never in the video.
+  Closing the layer while recording saves first, and a recording that can no longer see the
+  screen (a locked PC, an unplugged monitor) saves what it has and says why.
 - **Record without drawing:** Record a region… in the tray menu, or Win+Alt+V, records a box of
   the screen while you go on using your apps; press the hotkey again to stop and save. The
   hotkey can be changed in Settings.
+- Settings > Capture > Recording sets the frame rate, the quality, whether the mouse pointer
+  shows, and the encoder (your graphics card's, or Windows' own).
+- A recording's problems are always told, even with capture notices turned off. On Windows N
+  editions recording needs the Media Feature Pack, and Overmark says so.
 
 ### Changed
 
-- The tray icon's tooltip groups the hotkeys that share their modifiers on one line, so every
-  hotkey fits.
+- The tray icon's tooltip groups the hotkeys that share their modifiers on one line
+  ("Win+Shift: D Draw · F Frozen · X Capture"), so every hotkey fits, and says when Overmark is
+  recording.
 
 ## [0.2.1] - 2026-11-04
 
