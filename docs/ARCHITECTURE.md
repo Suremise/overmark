@@ -1469,7 +1469,10 @@ size the encoder refuses is said with its reason (`record-error-encoder-refused`
 3. **Timestamps from real time** (the performance counter): frame `n` is at `n / fps` seconds of
    recorded time (`core::record::frame_time`, exact at 15 fps too). **A pause** stops the
    recorded clock (`core::record::Clock`): the paused time is taken off every later time, so
-   the video has neither a gap nor a frozen stretch. While paused the thread sleeps.
+   the video has neither a gap nor a frozen stretch. While paused the thread waits on a
+   condition variable, checking capture every 250 ms without encoding or advancing time.
+   Capture loss still finishes the file and signals the controls; stop and resume wake the
+   wait immediately. The wait also bounds CPU use when the desktop changes continuously.
 4. **The pointer drawn in** from Desktop Duplication's shape and position
    (`core::record::pointer::draw`, tested): colour shapes blended by alpha, masked-colour ones
    replacing or inverting, and monochrome ones by their AND and XOR masks, as Windows draws

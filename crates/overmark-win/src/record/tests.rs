@@ -10,6 +10,90 @@ use overmark_core::record::UNITS_PER_SEC;
 /// The pattern's left half, BGRA: (R 200, G 100, B 50).
 const LEFT: [u8; 4] = [50, 100, 200, 255];
 
+/// Gates the first running acquisition so the caller can pause before loss is observed.
+struct PausedLossSource {
+    first: bool,
+    changes_before_loss: usize,
+    entered: Option<std::sync::mpsc::Sender<()>>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+impl Source for PausedLossSource {
+    fn next(&mut self, _: u32, scene: &mut Scene) -> Result<bool, RecordError> {
+        if self.first {
+            self.first = false;
+            scene.image = LEFT.repeat(48 * 48);
+            return Ok(true);
+        }
+        if let Some(tx) = self.entered.take() {
+            tx.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+            return Ok(false);
+        }
+        if self.changes_before_loss > 0 {
+            self.changes_before_loss -= 1;
+            return Ok(true);
+        }
+        Err(RecordError::CaptureLost(
+            "injected paused display loss".into(),
+        ))
+    }
+}
+
+#[test]
+fn a_paused_recording_saves_and_reports_capture_loss_without_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (ended_tx, ended_rx) = std::sync::mpsc::channel();
+    let area = PixelRect::new(0, 0, 48, 48);
+    let mut start = Start::new(area, RecordSettings::default(), dir.path().join("clip.mp4"));
+    start.encoder = EncoderChoice::Software;
+    let rec = Recording::start_with(
+        start,
+        area,
+        Box::new(move || {
+            Ok(Box::new(PausedLossSource {
+                first: true,
+                changes_before_loss: 2,
+                entered: Some(entered_tx),
+                release: release_rx,
+            }))
+        }),
+        Box::new(move || {
+            let _ = ended_tx.send(());
+        }),
+    )
+    .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    rec.pause();
+    let paused_at = rec.elapsed();
+    release_tx.send(()).unwrap();
+    let ended = ended_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let status = rec.status();
+    let elapsed = rec.elapsed();
+    // Join even on failure, so a broken pause wait never leaves a worker behind.
+    let saved = rec.stop().unwrap();
+    assert!(ended, "capture loss not reported; status {status:?}");
+    assert_eq!(status, Status::Ended);
+    assert_eq!(elapsed, paused_at);
+    assert!(matches!(saved.ended_by, Some(RecordError::CaptureLost(_))));
+    assert!(ended_rx.try_recv().is_err(), "completion is delivered once");
+    let info = mf::probe(&saved.path).unwrap();
+    assert_eq!(info.frames, saved.frames);
+    assert!((info.duration_100ns - saved.duration.as_nanos() as i64 / 100).abs() < 20_000);
+    assert!(saved.duration.abs_diff(paused_at) <= Duration::from_millis(67));
+    let (w, h, image) = mf::decode_frame_at(&saved.path, 0).unwrap();
+    assert_eq!((w, h), (48, 48));
+    assert!(
+        image[..3]
+            .iter()
+            .zip(LEFT)
+            .all(|(&a, b)| a.abs_diff(b) <= 8)
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
 /// A screen whose marker changes on every acquisition. Waiting advances the fake clock;
 /// encoding advances it too, so no wall-clock waits or hardware speed affect the schedule.
 struct ScheduledSource {
@@ -399,6 +483,43 @@ fn discard_deletes_the_file() {
     rec.discard();
     let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
     assert!(left.is_empty(), "left behind: {left:?}");
+}
+
+#[test]
+fn a_paused_recording_can_be_stopped_or_discarded() {
+    for discard in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let ended = Arc::new(AtomicUsize::new(0));
+        let notification = ended.clone();
+        let rec = start_pattern(
+            dir.path(),
+            48,
+            48,
+            RecordSettings::default(),
+            None,
+            Box::new(move || {
+                notification.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
+        .unwrap();
+        rec.pause();
+        let paused_at = rec.elapsed();
+        assert_eq!(rec.status(), Status::Paused);
+        if discard {
+            rec.discard();
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        } else {
+            let saved = rec.stop().unwrap();
+            assert!(saved.ended_by.is_none());
+            assert!(saved.duration.abs_diff(paused_at) <= Duration::from_millis(67));
+            assert_eq!(mf::probe(&saved.path).unwrap().frames, saved.frames);
+        }
+        assert_eq!(
+            ended.load(Ordering::SeqCst),
+            0,
+            "requested stops do not signal loss"
+        );
+    }
 }
 
 #[test]

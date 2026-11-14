@@ -621,14 +621,29 @@ fn run(
     let (how, stop_at) = loop {
         let active = {
             let mut state = shared.lock();
-            while state.clock.is_paused() && state.stop.is_none() {
-                state = shared
+            if state.clock.is_paused() && state.stop.is_none() {
+                // A frame may arrive immediately on a busy desktop: pace checks with the
+                // condvar, not capture's timeout, so pausing cannot become a busy loop.
+                // Stop/resume wake this wait immediately. Never hold the lock in capture.
+                let (next, _) = shared
                     .changed
-                    .wait(state)
+                    .wait_timeout(state, Duration::from_millis(250))
                     .unwrap_or_else(|e| e.into_inner());
+                state = next;
             }
             if let Some(stop) = state.stop {
                 break stop;
+            }
+            if state.clock.is_paused() {
+                drop(state);
+                match source.next(0, &mut scene) {
+                    Ok(changed) => dirty |= changed,
+                    Err(e) => {
+                        ended_by = Some(e);
+                        break (Stop::Save, clock::now_100ns());
+                    }
+                }
+                continue;
             }
             state.clock.active(clock::now_100ns())
         };
