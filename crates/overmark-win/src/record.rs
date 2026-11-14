@@ -484,6 +484,14 @@ fn publication_error(path: &Path, part: &Path, e: impl std::fmt::Display) -> Rec
     )
 }
 
+/// The encoder couldn't finish `part`: it's kept, under its own (possibly numbered) name.
+fn unfinished_error(part: &Path, e: impl std::fmt::Display) -> RecordError {
+    RecordError::Unfinished {
+        partial: part.display().to_string(),
+        detail: e.to_string(),
+    }
+}
+
 fn file_error(path: &Path, e: impl std::fmt::Display) -> RecordError {
     RecordError::File {
         path: path.display().to_string(),
@@ -700,7 +708,7 @@ fn run(
         Err(RecordError::Encoding("discarded".into()))
     } else if let Err(e) = finished {
         // The file can't play without its index: say so, keep the part for what it's worth.
-        Err(RecordError::Encoding(e.message()))
+        Err(unfinished_error(&part, e.message()))
     } else {
         match publish_with(&part, &start.path, crate::win32::files::rename_no_replace) {
             Err(e) => Err(e),

@@ -777,6 +777,37 @@ The finished video is kept at: {}",
 }
 
 #[test]
+fn an_unfinished_video_names_its_numbered_partial_file_and_may_not_play() {
+    let dir = tempfile::tempdir().unwrap();
+    let requested = dir.path().join("clip.mp4");
+    let first = reserve_part(&requested).unwrap();
+    let part = reserve_part(&requested).unwrap();
+    assert_eq!(part, dir.path().join("clip.mp4.2.part"));
+    std::fs::write(&part, b"unfinished video").unwrap();
+    // A Media Foundation message ends with a full stop; the system's I/O text doesn't.
+    for reason in [
+        "The request is invalid in the current state.",
+        "(os error 5)",
+    ] {
+        let error = unfinished_error(&part, reason);
+        assert!(matches!(&error, RecordError::Unfinished { partial, .. }
+            if *partial == part.display().to_string()));
+        assert_eq!(
+            error.message(),
+            format!(
+                "The video couldn't be finished: {reason}
+What was recorded may not play. It is kept at: {}",
+                part.display()
+            )
+        );
+        assert!(!error.message().contains("finished video"));
+    }
+    // Naming the file leaves it, and the other recording's, as they were.
+    assert_eq!(std::fs::read(&part).unwrap(), b"unfinished video");
+    assert!(first.exists());
+}
+
+#[test]
 fn publication_supports_long_paths_and_unicode_names() {
     let dir = tempfile::tempdir().unwrap();
     let mut folder = dir.path().to_owned();

@@ -401,6 +401,9 @@ pub enum RecordError {
     CaptureLost(String),
     /// The encoder or the file writer failed.
     Encoding(String),
+    /// The encoder couldn't finish the file (write its index), so the partial file at `partial`
+    /// is kept as it is but may not play.
+    Unfinished { partial: String, detail: String },
     /// The file couldn't be made, written or moved into place.
     File { path: String, detail: String },
 }
@@ -440,6 +443,11 @@ impl RecordError {
             RecordError::Encoding(detail) => {
                 tr!("record-error-encoding", reason = detail.as_str())
             }
+            RecordError::Unfinished { partial, detail } => tr!(
+                "record-error-unfinished",
+                partial = partial.as_str(),
+                reason = detail.as_str()
+            ),
             RecordError::File { path, detail } => tr!(
                 "record-error-file",
                 path = path.as_str(),

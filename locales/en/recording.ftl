@@ -12,6 +12,12 @@ record-error-encoder-refused = The video encoder won't record a box { $width } x
 record-error-capture-unavailable = The screen can't be recorded just now: { $reason }
 record-error-capture-lost = The recording stopped because the screen couldn't be captured any more: { $reason }. What was recorded until then is saved.
 record-error-encoding = The video couldn't be encoded: { $reason }
+# The encoder couldn't finish the file, which is kept as it is. $partial: the kept partial
+# file's full path. The line break keeps the second sentence apart from the reason whichever
+# way the reason ends.
+record-error-unfinished =
+    The video couldn't be finished: { $reason }
+    What was recorded may not play. It is kept at: { $partial }
 # $path: the video's file.
 record-error-file = The video { $path } couldn't be written: { $reason }
 record-error-name-collisions = Other files kept taking the available names.

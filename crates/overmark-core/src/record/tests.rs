@@ -204,6 +204,10 @@ fn every_error_has_a_message() {
         RecordError::CaptureUnavailable("x".into()),
         RecordError::CaptureLost("x".into()),
         RecordError::Encoding("x".into()),
+        RecordError::Unfinished {
+            partial: "C:\\v.mp4.part".into(),
+            detail: "x".into(),
+        },
         RecordError::File {
             path: "C:\\v.mp4".into(),
             detail: "x".into(),
