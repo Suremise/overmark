@@ -24,7 +24,7 @@ use overmark_core::i18n::tr;
 use overmark_core::record::{Encoder, PixelRect, RecordError, place};
 use overmark_core::tr;
 use overmark_win::record::{EncoderChoice, Saved, Start, Status};
-use overmark_win::region::{Picked, Picker};
+use overmark_win::region::{Picked, Picker, Purpose};
 use overmark_win::win32::dpi::{self, Monitor};
 use overmark_win::win32::toast::Toast;
 use overmark_win::win32::{Rect, capture, clock, shell, window};
@@ -270,7 +270,7 @@ impl App {
             })
             .unwrap_or(0);
         let had_keyboard = window::foreground();
-        match Picker::open(&monitors, &images, focus) {
+        match Picker::open(&monitors, &images, focus, Purpose::Recording) {
             Ok(picker) => {
                 tracing::info!(screens = monitors.len(), "choosing a box to record");
                 self.screen_pick = Some(ScreenPick {
@@ -558,6 +558,16 @@ mod tests {
         for (screen, raw) in [
             (0, Rect::new(1800, 100, 2001, 401)),
             (1, Rect::new(-100, 100, 101, 401)),
+        ] {
+            let error = place_record_box(&monitors, screen, raw).unwrap_err();
+            assert_eq!(error, RecordError::Place(PlaceError::SpansMonitors));
+            assert_eq!(error.message(), tr("record-error-two-monitors"));
+        }
+        // A drag from within 3 pixels of the shared edge, across it either way: the chooser
+        // hands it on unclipped (a sliver on its own monitor), and it is refused the same way.
+        for (screen, raw) in [
+            (0, Rect::new(1917, 100, 2301, 401)),
+            (1, Rect::new(-300, 100, 3, 401)),
         ] {
             let error = place_record_box(&monitors, screen, raw).unwrap_err();
             assert_eq!(error, RecordError::Place(PlaceError::SpansMonitors));

@@ -1603,7 +1603,10 @@ the bar, the toolbar, the dim and the notice are excluded from capture, so it ne
   hint and the size. The preview and screenshot rectangle stay on the starting monitor;
   outcomes also retain the raw drag in that monitor's physical pixels. Both recording entry
   points translate those raw bounds to desktop pixels before placement, so a drag spanning
-  monitors shows the existing refusal instead of opening a clipped ready box. Esc cancels;
+  monitors shows the existing refusal instead of opening a clipped ready box. Opened with
+  `Purpose::Recording`, a drag that clips to under 4 pixels on its monitor still ends choosing
+  when the raw drag is at least 4 × 4 and reaches another monitor (started just beside a shared
+  edge), so it is refused rather than taken as a click; a screenshot's is a click. Esc cancels;
   `poll` gives `Picked`. The overlay
   opens it over its composed images (and sifts the layers' events while it's up, as before); a
   mode without the layer opens it over plain grabs.

@@ -1366,15 +1366,19 @@ impl Overlay {
     /// Starts choosing a region on every monitor: `images[i]` is what monitor `i` will save
     /// (its frame with its drawing), which its selection shows still while the screen goes on
     /// underneath. The drag can start on any monitor, and the region stays on the monitor it
-    /// started on. `focus` (the monitor under the cursor) takes the keyboard, for Esc. The
+    /// started on. `focus` (the monitor under the cursor) takes the keyboard, for Esc;
+    /// `purpose` says whether the box is a screenshot's or the toolbar's Record's. The
     /// result comes as [`OverlayEvent::RegionChosen`] or [`OverlayEvent::RegionCancelled`].
     pub fn begin_region(
         &mut self,
         focus: usize,
         images: &[crate::save::Image],
+        purpose: crate::region::Purpose,
     ) -> windows::core::Result<()> {
         let monitors: Vec<Monitor> = self.screens.iter().map(|s| s.monitor.clone()).collect();
-        self.selection = Some(crate::region::Picker::open(&monitors, images, focus)?);
+        self.selection = Some(crate::region::Picker::open(
+            &monitors, images, focus, purpose,
+        )?);
         Ok(())
     }
 
@@ -1528,6 +1532,45 @@ mod tests {
             ),
             Err(PlaceError::SpansMonitors)
         );
+    }
+
+    /// The toolbar's Record, a drag from 2 pixels inside monitor A's shared edge into B: the
+    /// selection ends with the full drag, which placement refuses; a screenshot's selection
+    /// takes the same drag as a click and stays open.
+    #[test]
+    fn toolbar_recording_ends_on_a_drag_across_the_shared_edge_from_beside_it() {
+        use crate::region::Purpose;
+        use crate::region::SelectionInput::{Down, Move, Up};
+        use overmark_core::record::{PixelRect, PlaceError, place};
+        let inputs = vec![
+            (0, Down(1918, 200)),
+            (0, Move(2200, 500)),
+            (0, Up(2200, 500)),
+        ];
+        let mut c = crate::region::two_monitors_for(Purpose::Recording);
+        let result = sift(vec![], inputs.clone(), Some(&mut c));
+        assert!(result.ended);
+        let [OverlayEvent::RegionChosen { screen, rect, raw }] = result.out.as_slice() else {
+            panic!("one region outcome expected: {:?}", result.out);
+        };
+        assert_eq!(*screen, 0);
+        assert_eq!(*rect, Rect::new(1918, 200, 1920, 501));
+        assert_eq!(*raw, Rect::new(1918, 200, 2201, 501));
+        let monitors = [
+            PixelRect::new(0, 0, 1920, 1080),
+            PixelRect::new(1920, 0, 4480, 1440),
+        ];
+        assert_eq!(
+            place(
+                PixelRect::new(raw.left, raw.top, raw.right, raw.bottom),
+                &monitors
+            ),
+            Err(PlaceError::SpansMonitors)
+        );
+        let mut c = crate::region::two_monitors();
+        let result = sift(vec![], inputs, Some(&mut c));
+        assert!(!result.ended, "a screenshot's selection stays open");
+        assert!(result.out.is_empty(), "{:?}", result.out);
     }
 
     /// The test message is a right-click on its screen's layer; a pointer message Windows

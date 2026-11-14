@@ -15,6 +15,7 @@ use overmark_win::overlay::{
     Backdrop, Command, Look, Overlay, OverlayEvent, freeze_toggled, log_name,
     reaches_ink_while_choosing,
 };
+use overmark_win::region::Purpose;
 use overmark_win::save;
 use overmark_win::win32::shell;
 use overmark_win::win32::toast::Toast;
@@ -1313,7 +1314,13 @@ impl App {
         let Some(overlay) = self.overlay.as_mut() else {
             return;
         };
-        match overlay.begin_region(screen, &images) {
+        // The toolbar's Record chooses here too: a drag across a shared edge is then refused.
+        let purpose = if self.pending_record {
+            Purpose::Recording
+        } else {
+            Purpose::Screenshot
+        };
+        match overlay.begin_region(screen, &images, purpose) {
             Ok(()) => {
                 tracing::info!(
                     screens = count,

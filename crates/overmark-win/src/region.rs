@@ -1,7 +1,8 @@
 //! Choosing a box on the screen: a selection window over each monitor, showing a still image
 //! of it darkened, with the box being dragged bright, a hint at the top and the box's size by
 //! its corner. Esc cancels. The preview and screenshot stay on the starting monitor;
-//! recording receives the full drag too, so it can refuse a box spanning monitors.
+//! recording receives the full drag too, so it can refuse a box spanning monitors, even one
+//! that starts a few pixels from a shared edge (clipped, it would look like a click).
 //!
 //! Saving a region and recording one both use it: the drawing layer opens it over the composed
 //! images of its monitors ([`crate::overlay::Overlay::begin_region`]), and a recording made
@@ -34,6 +35,17 @@ pub enum Picked {
     Cancelled,
 }
 
+/// What a box is chosen for: it decides only whether a tiny clipped box that reaches another
+/// monitor ends choosing (for a recording to refuse it plainly) or is taken as a click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// A screenshot of a region: a box under 4 pixels on its monitor is a click.
+    Screenshot,
+    /// A box to record: a drag across a shared edge is chosen, however little of it is on its
+    /// starting monitor, so the recording says it can't span monitors.
+    Recording,
+}
+
 /// Choosing a box: each monitor's selection window, and the drag they share.
 pub struct Picker {
     windows: Vec<Selection>,
@@ -48,6 +60,7 @@ impl Picker {
         monitors: &[Monitor],
         images: &[crate::save::Image],
         focus: usize,
+        purpose: Purpose,
     ) -> windows::core::Result<Picker> {
         let inputs = Rc::new(RefCell::new(Vec::new()));
         let mut windows = Vec::with_capacity(monitors.len());
@@ -73,10 +86,10 @@ impl Picker {
                 "the selection's keyboard"
             );
         }
-        let sizes = windows.iter().map(|w| w.size()).collect();
+        let rects = monitors.iter().map(|m| m.rect).collect();
         Ok(Picker {
             windows,
-            chooser: Chooser::new(sizes),
+            chooser: Chooser::new(rects, purpose),
             inputs,
         })
     }
@@ -176,15 +189,20 @@ impl Choice {
 /// The drag across the monitors' selection windows (each monitor's pixels): one at a time, on
 /// the monitor where its button went down, clipped to that monitor.
 pub(crate) struct Chooser {
-    /// Each monitor's size.
-    sizes: Vec<(i32, i32)>,
+    /// Each monitor on the virtual desktop (physical pixels).
+    monitors: Vec<Rect>,
+    purpose: Purpose,
     /// The drag: its monitor, where it started and the rectangle so far.
     drag: Option<(usize, (i32, i32), Rect)>,
 }
 
 impl Chooser {
-    pub(crate) fn new(sizes: Vec<(i32, i32)>) -> Chooser {
-        Chooser { sizes, drag: None }
+    pub(crate) fn new(monitors: Vec<Rect>, purpose: Purpose) -> Chooser {
+        Chooser {
+            monitors,
+            purpose,
+            drag: None,
+        }
     }
 
     /// Monitor `i`'s rectangle so far (empty while nothing is dragged there).
@@ -198,8 +216,33 @@ impl Chooser {
     /// The rectangle from `start` to `to` on monitor `i`, clipped to it (with the mouse
     /// captured, a drag goes on past the monitor's edge).
     fn span_on(&self, i: usize, start: (i32, i32), to: (i32, i32)) -> Rect {
-        let (w, h) = self.sizes[i];
-        span(start, to).clamp_to(w, h)
+        let m = self.monitors[i];
+        span(start, to).clamp_to(m.width(), m.height())
+    }
+
+    /// Whether a lift on monitor `at` ends choosing: its clipped `rect` is a box, not a click;
+    /// or, for a recording, the full drag `raw` is one and reaches another monitor. Started a
+    /// few pixels from a shared edge, such a drag clips to a sliver, and taken as a click it
+    /// would leave the selection open with no word of why.
+    fn chooses(&self, at: usize, rect: Rect, raw: Rect) -> bool {
+        let sized = |r: Rect| r.width() >= 4 && r.height() >= 4;
+        if sized(rect) {
+            return true;
+        }
+        if self.purpose != Purpose::Recording || !sized(raw) {
+            return false;
+        }
+        let origin = self.monitors[at];
+        let on_desktop = Rect::new(
+            origin.left + raw.left,
+            origin.top + raw.top,
+            origin.left + raw.right,
+            origin.top + raw.bottom,
+        );
+        self.monitors
+            .iter()
+            .enumerate()
+            .any(|(i, m)| i != at && !on_desktop.intersect(m).is_empty())
     }
 
     /// Monitor `screen`'s selection window got `input`.
@@ -207,7 +250,7 @@ impl Chooser {
         if input == SelectionInput::Escape {
             return Choice::Cancelled;
         }
-        if screen >= self.sizes.len() {
+        if screen >= self.monitors.len() {
             return Choice::Going(None);
         }
         match (input, self.drag) {
@@ -224,16 +267,17 @@ impl Chooser {
             }
             (SelectionInput::Up(x, y), Some((at, start, _))) => {
                 let rect = self.span_on(at, start, (x, y));
+                let raw = span(start, (x, y));
                 self.drag = None;
                 // A click without a drag chooses nothing: keep choosing.
-                if rect.width() < 4 || rect.height() < 4 {
-                    Choice::Going(Some(at))
-                } else {
+                if self.chooses(at, rect, raw) {
                     Choice::Chosen {
                         screen: at,
                         rect,
-                        raw: span(start, (x, y)),
+                        raw,
                     }
+                } else {
+                    Choice::Going(Some(at))
                 }
             }
             // A move or a lift with no drag (the button went down elsewhere).
@@ -368,7 +412,6 @@ struct Selection {
     bright: Vec<u8>,
     shaded: Vec<u8>,
     width: i32,
-    height: i32,
     /// The rectangle being dragged here (empty while there's none).
     rect: Rect,
 }
@@ -451,7 +494,6 @@ impl Selection {
             bright,
             shaded,
             width: monitor.rect.width(),
-            height: monitor.rect.height(),
             rect: Rect::default(),
         };
         // The hint from the start, before anything is dragged.
@@ -514,11 +556,6 @@ impl Selection {
         if let Err(error) = self.layer.present(origin) {
             tracing::warn!(%error, "couldn't show the selection");
         }
-    }
-
-    /// Its monitor's size.
-    fn size(&self) -> (i32, i32) {
-        (self.width, self.height)
     }
 }
 
@@ -626,10 +663,20 @@ impl Outline {
     }
 }
 
-/// Two monitors: A (0) at 1920 × 1080 and B (1) at 2560 × 1440 (for the overlay's tests too).
+/// Two monitors side by side, choosing for `purpose`: A (0) at 1920 × 1080 and B (1) at
+/// 2560 × 1440 to its right, tops level (for the overlay's tests too).
+#[cfg(test)]
+pub(crate) fn two_monitors_for(purpose: Purpose) -> Chooser {
+    Chooser::new(
+        vec![Rect::new(0, 0, 1920, 1080), Rect::new(1920, 0, 4480, 1440)],
+        purpose,
+    )
+}
+
+/// [`two_monitors_for`] a screenshot.
 #[cfg(test)]
 pub(crate) fn two_monitors() -> Chooser {
-    Chooser::new(vec![(1920, 1080), (2560, 1440)])
+    two_monitors_for(Purpose::Screenshot)
 }
 
 #[cfg(test)]
@@ -666,6 +713,101 @@ mod tests {
             assert_eq!(
                 RecordError::from(result.unwrap_err()).message(),
                 crate::core::i18n::tr("record-error-two-monitors")
+            );
+        }
+    }
+
+    /// A recording drag that starts within 3 pixels of the shared edge and crosses it, either
+    /// way: clipped it is a sliver, but it reaches the other monitor, so it is chosen and the
+    /// recording refuses it with the two-monitor message. A screenshot keeps it as a click.
+    #[test]
+    fn a_recording_drag_from_beside_a_shared_edge_is_chosen_and_refused() {
+        use overmark_core::record::{PixelRect, PlaceError, RecordError, place};
+        crate::core::i18n::init("en");
+        let desktop = [
+            PixelRect::new(0, 0, 1920, 1080),
+            PixelRect::new(1920, 0, 4480, 1440),
+        ];
+        // A's right edge rightwards into B; B's left edge leftwards into A.
+        for (screen, down, up, clipped, raw) in [
+            (
+                0,
+                (1917, 100),
+                (2300, 400),
+                Rect::new(1917, 100, 1920, 401),
+                Rect::new(1917, 100, 2301, 401),
+            ),
+            (
+                1,
+                (2, 100),
+                (-300, 400),
+                Rect::new(0, 100, 3, 401),
+                Rect::new(-300, 100, 3, 401),
+            ),
+        ] {
+            let mut c = two_monitors_for(Purpose::Recording);
+            c.input(screen, Down(down.0, down.1));
+            c.input(screen, Move(up.0, up.1));
+            assert_eq!(
+                c.input(screen, Up(up.0, up.1)),
+                Choice::Chosen {
+                    screen,
+                    rect: clipped,
+                    raw
+                },
+                "monitor {screen}"
+            );
+            let o = desktop[screen];
+            let result = place(
+                PixelRect::new(
+                    o.left + raw.left,
+                    o.top + raw.top,
+                    o.left + raw.right,
+                    o.top + raw.bottom,
+                ),
+                &desktop,
+            );
+            assert_eq!(result, Err(PlaceError::SpansMonitors), "monitor {screen}");
+            assert_eq!(
+                RecordError::from(result.unwrap_err()).message(),
+                crate::core::i18n::tr("record-error-two-monitors")
+            );
+            // The same drag for a screenshot: a sliver is a click, and choosing goes on.
+            let mut c = two_monitors();
+            c.input(screen, Down(down.0, down.1));
+            assert_eq!(c.input(screen, Up(up.0, up.1)), Choice::Going(Some(screen)));
+            assert!(c.rect(screen).is_empty());
+        }
+    }
+
+    /// For a recording, a click is still a click, and a sliver whose drag reaches no other
+    /// monitor (past the desktop's outer edge) is too: choosing goes on, as for a screenshot.
+    #[test]
+    fn a_recording_click_or_a_sliver_off_the_desktop_keeps_choosing() {
+        for purpose in [Purpose::Screenshot, Purpose::Recording] {
+            let mut c = two_monitors_for(purpose);
+            c.input(0, Down(5, 5));
+            assert_eq!(c.input(0, Up(6, 7)), Choice::Going(Some(0)), "{purpose:?}");
+            // Beside the shared edge but only 2 pixels across it: a click.
+            c.input(0, Down(1918, 100));
+            assert_eq!(
+                c.input(0, Up(1921, 101)),
+                Choice::Going(Some(0)),
+                "{purpose:?}"
+            );
+            // B's right edge is the desktop's: nothing is there to span.
+            c.input(1, Down(2558, 100));
+            assert_eq!(
+                c.input(1, Up(2900, 400)),
+                Choice::Going(Some(1)),
+                "{purpose:?}"
+            );
+            // A's top edge is the desktop's too.
+            c.input(0, Down(100, 1));
+            assert_eq!(
+                c.input(0, Up(400, -300)),
+                Choice::Going(Some(0)),
+                "{purpose:?}"
             );
         }
     }
