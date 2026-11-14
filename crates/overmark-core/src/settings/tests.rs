@@ -505,6 +505,8 @@ const RELEASED: &[(&str, &str)] = &[
     ("0.2.1-changed", include_str!("released/0.2.1-changed.toml")),
     ("0.3.0-default", include_str!("released/0.3.0-default.toml")),
     ("0.3.0-changed", include_str!("released/0.3.0-changed.toml")),
+    ("0.3.1-default", include_str!("released/0.3.1-default.toml")),
+    ("0.3.1-changed", include_str!("released/0.3.1-changed.toml")),
 ];
 
 /// Every key `old` sets is in `new` with the same value. (`new` is the file as this version

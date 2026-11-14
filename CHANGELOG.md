@@ -6,9 +6,35 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-14
+
+Fixes for recording: videos keep up when the encoder is slow, a paused recording saves when the
+screen is lost, a box across two monitors is refused with a reason, and a video is never lost or
+saved over another file.
+
+**Not signed yet:** Windows SmartScreen may warn the first time you run the installer or the exe
+("Windows protected your PC"). Check the download against the release's `SHA256SUMS.txt` first
+(`sha256sum -c SHA256SUMS.txt --ignore-missing`, or compare `Get-FileHash <file>` with it), and
+if it matches, choose **More info**, then **Run anyway**. Installing it over 0.3.0 keeps your
+settings.
+
 ### Fixed
 
-- Start with Windows now shows startup enabled by a machine-wide installer and explains why it cannot be turned off in the app.
+- A video no longer freezes on one picture when your graphics card's or Windows' encoder falls
+  behind: it keeps showing what's on the screen, and a lost screen is still noticed at once.
+- A paused recording now saves what it has and says why when it can no longer see the screen (a
+  locked PC, an unplugged monitor), as a running one already did.
+- Recording a box that crosses from one monitor to another is refused with a message saying a
+  recording is of one monitor, from the toolbar's Record and from Record a region… alike,
+  including a drag that starts right at the edge the two monitors share. Before, it could record
+  only part of the box, or stay waiting with no explanation.
+- Saving a finished video never replaces a file another program saved under the same name at
+  that moment: Overmark picks the next free name instead, on virtual drives too.
+- When a video can't be saved under its name, or can't be finished, the message names the
+  partial file Overmark kept so you can find what was recorded, and says when it may not play.
+- Start with Windows in Settings and the tray menu now sees startup turned on for every user by a
+  machine-wide install (the MSI's `ALLUSERS=1 STARTWITHWINDOWS=1`), says the installer manages it
+  and can't be turned off in the app, and Reset no longer claims to turn it off.
 
 ## [0.3.0] - 2026-11-07
 
