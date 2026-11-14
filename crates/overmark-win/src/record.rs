@@ -404,6 +404,28 @@ fn free_path(path: &Path) -> PathBuf {
         .expect("a free name")
 }
 
+/// Publishes a finished partial file without replacing an existing destination. The move is
+/// supplied so tests can create a competing file precisely after name selection. Collisions
+/// retry a fresh name; other failures (or persistent contention) leave the partial intact.
+fn publish_with(
+    part: &Path,
+    requested: &Path,
+    mut move_file: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<PathBuf, RecordError> {
+    for _ in 0..100 {
+        let path = free_path(requested);
+        match move_file(part, &path) {
+            Ok(()) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(file_error(&path, e)),
+        }
+    }
+    Err(file_error(
+        requested,
+        crate::core::i18n::tr("record-error-name-collisions"),
+    ))
+}
+
 fn file_error(path: &Path, e: impl std::fmt::Display) -> RecordError {
     RecordError::File {
         path: path.display().to_string(),
@@ -626,10 +648,9 @@ fn run(
         // The file can't play without its index: say so, keep the part for what it's worth.
         Err(RecordError::Encoding(e.message()))
     } else {
-        let path = free_path(&start.path);
-        match std::fs::rename(&part, &path) {
-            Err(e) => Err(file_error(&path, e)),
-            Ok(()) => {
+        match publish_with(&part, &start.path, crate::win32::files::rename_no_replace) {
+            Err(e) => Err(e),
+            Ok(path) => {
                 let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 let duration_100ns = frame_time(written, rate);
                 Ok(Saved {

@@ -14,6 +14,7 @@ record-error-capture-lost = The recording stopped because the screen couldn't be
 record-error-encoding = The video couldn't be encoded: { $reason }
 # $path: the video's file.
 record-error-file = The video { $path } couldn't be written: { $reason }
+record-error-name-collisions = Other files kept taking the available names. The finished video is kept in its partial file.
 
 ## The control bar on the box's top edge
 

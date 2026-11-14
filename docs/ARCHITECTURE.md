@@ -1478,7 +1478,10 @@ size the encoder refuses is said with its reason (`record-error-encoder-refused`
    `<name>.mp4.part` until it's finished, then renamed (a taken name gets ` (2)`). The partial
    file is made with `create_new` before anything else (`<name>.mp4.2.part` and so on if one is
    there), so a recording only ever replaces or deletes its own, never another recording's or
-   one left from a failed finish. High profile,
+   one left from a failed finish. Publishing the finished file uses a same-volume Windows
+   move without replacement: if another writer takes the chosen name meanwhile, the move
+   fails and a new name is tried (up to 100 collisions). Other failures leave the finalized
+   partial file intact. High profile,
    no B-frames, the index (`moov`) at the end as Media Foundation writes it. (Its option to put
    the index first left stale bytes between the index and the video, which its own reader then
    refused, so it isn't used.) **The encoder** is the GPU's (NVENC, Quick Sync, AMD's) when the

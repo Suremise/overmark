@@ -25,6 +25,7 @@ pub mod clock;
 pub mod d3d;
 pub mod dcomp;
 pub mod dpi;
+pub(crate) mod files;
 pub mod hotkey_probe;
 pub mod http;
 pub mod known_folders;

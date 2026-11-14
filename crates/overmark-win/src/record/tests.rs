@@ -401,6 +401,87 @@ fn failing_start(dir: &Path) -> Result<Recording, RecordError> {
 const THEIRS: &[u8] = b"another recording";
 
 #[test]
+fn publishing_keeps_files_created_after_name_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    let requested = dir.path().join("clip.mp4");
+    let second = dir.path().join("clip (2).mp4");
+    let third = dir.path().join("clip (3).mp4");
+    let part = reserve_part(&requested).unwrap();
+    let ours = b"the finished video";
+    std::fs::write(&part, ours).unwrap();
+    let mut attempts = Vec::new();
+    let saved = publish_with(&part, &requested, |from, to| {
+        attempts.push(to.to_owned());
+        if to == requested || to == second {
+            std::fs::write(to, THEIRS).unwrap();
+        }
+        crate::win32::files::rename_no_replace(from, to)
+    })
+    .unwrap();
+    assert_eq!(std::fs::read(&requested).unwrap(), THEIRS);
+    assert_eq!(std::fs::read(&second).unwrap(), THEIRS);
+    assert_eq!(saved, third);
+    assert_eq!(std::fs::read(&saved).unwrap(), ours);
+    assert!(!part.exists());
+    assert_eq!(attempts, [requested, second, third]);
+}
+
+#[test]
+fn a_publication_error_keeps_the_finished_partial_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("clip.mp4.part");
+    std::fs::write(&part, b"finished video").unwrap();
+    let requested = dir.path().join("missing-folder").join("clip.mp4");
+    let mut calls = 0;
+    let result = publish_with(&part, &requested, |from, to| {
+        calls += 1;
+        crate::win32::files::rename_no_replace(from, to)
+    });
+    assert!(matches!(result, Err(RecordError::File { path, .. })
+        if path == requested.display().to_string()));
+    assert_eq!(calls, 1, "only name collisions should retry");
+    assert_eq!(std::fs::read(&part).unwrap(), b"finished video");
+    assert!(!requested.exists());
+}
+
+#[test]
+fn persistent_publication_collisions_are_bounded_and_keep_every_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let requested = dir.path().join("clip.mp4");
+    let part = reserve_part(&requested).unwrap();
+    std::fs::write(&part, b"finished video").unwrap();
+    let mut theirs = Vec::new();
+    let result = publish_with(&part, &requested, |from, to| {
+        std::fs::write(to, THEIRS).unwrap();
+        theirs.push(to.to_owned());
+        crate::win32::files::rename_no_replace(from, to)
+    });
+    assert!(matches!(result, Err(RecordError::File { .. })));
+    assert_eq!(theirs.len(), 100);
+    assert_eq!(std::fs::read(&part).unwrap(), b"finished video");
+    for path in theirs {
+        assert_eq!(std::fs::read(path).unwrap(), THEIRS);
+    }
+}
+
+#[test]
+fn publication_supports_long_paths_and_unicode_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut folder = dir.path().to_owned();
+    for _ in 0..5 {
+        folder.push("long-directory-".repeat(4));
+    }
+    std::fs::create_dir_all(&folder).unwrap();
+    let requested = folder.join("記録 🎬.mp4");
+    let part = reserve_part(&requested).unwrap();
+    std::fs::write(&part, b"finished video").unwrap();
+    let saved = publish_with(&part, &requested, crate::win32::files::rename_no_replace).unwrap();
+    assert_eq!(saved, requested);
+    assert_eq!(std::fs::read(saved).unwrap(), b"finished video");
+    assert!(!part.exists());
+}
+
+#[test]
 fn a_failed_start_leaves_another_recordings_partial_file_alone() {
     let dir = tempfile::tempdir().unwrap();
     let theirs = dir.path().join("clip.mp4.part");
