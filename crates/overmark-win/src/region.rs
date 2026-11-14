@@ -1,6 +1,7 @@
 //! Choosing a box on the screen: a selection window over each monitor, showing a still image
 //! of it darkened, with the box being dragged bright, a hint at the top and the box's size by
-//! its corner. Esc cancels. A drag stays on the monitor it began on.
+//! its corner. Esc cancels. The preview and screenshot stay on the starting monitor;
+//! recording receives the full drag too, so it can refuse a box spanning monitors.
 //!
 //! Saving a region and recording one both use it: the drawing layer opens it over the composed
 //! images of its monitors ([`crate::overlay::Overlay::begin_region`]), and a recording made
@@ -23,7 +24,12 @@ use crate::win32::window::{self, Handler, Named, Options};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Picked {
     /// A box on monitor `screen` (an index into the monitors given), in its pixels.
-    Chosen { screen: usize, rect: Rect },
+    Chosen {
+        screen: usize,
+        rect: Rect,
+        /// The full drag in the starting monitor's physical pixels, before clipping.
+        raw: Rect,
+    },
     /// Esc on any monitor.
     Cancelled,
 }
@@ -92,8 +98,7 @@ impl Picker {
             match self.chooser.input(screen, input) {
                 Choice::Going(None) => {}
                 Choice::Going(Some(changed)) => self.redraw(changed),
-                Choice::Chosen { screen, rect } => return Some(Picked::Chosen { screen, rect }),
-                Choice::Cancelled => return Some(Picked::Cancelled),
+                done => return done.picked(),
             }
         }
         None
@@ -147,9 +152,25 @@ pub(crate) enum Choice {
     /// Still choosing; the monitor whose drag changed, to be shown again.
     Going(Option<usize>),
     /// A region on monitor `screen`, in its pixels.
-    Chosen { screen: usize, rect: Rect },
+    Chosen {
+        screen: usize,
+        rect: Rect,
+        /// The full drag in the starting monitor's physical pixels, before clipping.
+        raw: Rect,
+    },
     /// Esc on any monitor.
     Cancelled,
+}
+
+impl Choice {
+    /// The public outcome used by the standalone screen picker.
+    fn picked(self) -> Option<Picked> {
+        match self {
+            Self::Chosen { screen, rect, raw } => Some(Picked::Chosen { screen, rect, raw }),
+            Self::Cancelled => Some(Picked::Cancelled),
+            Self::Going(_) => None,
+        }
+    }
 }
 
 /// The drag across the monitors' selection windows (each monitor's pixels): one at a time, on
@@ -208,7 +229,11 @@ impl Chooser {
                 if rect.width() < 4 || rect.height() < 4 {
                     Choice::Going(Some(at))
                 } else {
-                    Choice::Chosen { screen: at, rect }
+                    Choice::Chosen {
+                        screen: at,
+                        rect,
+                        raw: span(start, (x, y)),
+                    }
                 }
             }
             // A move or a lift with no drag (the button went down elsewhere).
@@ -612,6 +637,39 @@ mod tests {
     use super::*;
     use SelectionInput::{Down, Escape, Move, Up};
 
+    #[test]
+    fn a_recording_drag_across_monitors_is_refused_before_clipping() {
+        use overmark_core::record::{PixelRect, PlaceError, RecordError, place};
+        crate::core::i18n::init("en");
+        // Physical coordinates: unequal sizes represent differently scaled displays.
+        // Translating the whole desktop also covers negative monitor origins.
+        for (x, y) in [(0, 0), (-1920, -200)] {
+            let mut c = two_monitors();
+            c.input(0, Down(1800, 100));
+            let Some(Picked::Chosen { rect, raw, .. }) = c.input(0, Up(2000, 400)).picked() else {
+                panic!("the drag must produce a choice");
+            };
+            assert_eq!(
+                rect,
+                Rect::new(1800, 100, 1920, 401),
+                "screenshots still clip"
+            );
+            let monitors = [
+                PixelRect::new(x, y, x + 1920, y + 1080),
+                PixelRect::new(x + 1920, y, x + 4480, y + 1440),
+            ];
+            let result = place(
+                PixelRect::new(x + raw.left, y + raw.top, x + raw.right, y + raw.bottom),
+                &monitors,
+            );
+            assert_eq!(result, Err(PlaceError::SpansMonitors));
+            assert_eq!(
+                RecordError::from(result.unwrap_err()).message(),
+                crate::core::i18n::tr("record-error-two-monitors")
+            );
+        }
+    }
+
     /// Run alone (nextest gives each test its own process), the fonts aren't loaded yet: as on
     /// a fresh start, when the tray's Capture a region… is the first thing done.
     #[test]
@@ -663,7 +721,8 @@ mod tests {
             c.input(1, Up(400, 300)),
             Choice::Chosen {
                 screen: 1,
-                rect: Rect::new(100, 200, 401, 301)
+                rect: Rect::new(100, 200, 401, 301),
+                raw: Rect::new(100, 200, 401, 301)
             }
         );
         // And on A, the cursor's monitor, as before.
@@ -673,7 +732,8 @@ mod tests {
             c.input(0, Up(50, 60)),
             Choice::Chosen {
                 screen: 0,
-                rect: Rect::new(10, 10, 51, 61)
+                rect: Rect::new(10, 10, 51, 61),
+                raw: Rect::new(10, 10, 51, 61)
             }
         );
     }
@@ -690,7 +750,8 @@ mod tests {
             c.input(0, Up(-50, 1200)),
             Choice::Chosen {
                 screen: 0,
-                rect: Rect::new(0, 1000, 1801, 1080)
+                rect: Rect::new(0, 1000, 1801, 1080),
+                raw: Rect::new(-50, 1000, 1801, 1201)
             }
         );
     }

@@ -154,7 +154,12 @@ pub enum OverlayEvent {
     /// A capture's key, or its [`WM_OVERMARK_COMMAND`].
     Command(Command),
     /// A region was chosen on monitor `screen`: `rect` in that monitor's pixels.
-    RegionChosen { screen: usize, rect: Rect },
+    RegionChosen {
+        screen: usize,
+        rect: Rect,
+        /// Unclipped drag bounds for recording validation, in monitor-local physical pixels.
+        raw: Rect,
+    },
     /// Choosing a region was cancelled (Esc): the overlay stays open.
     RegionCancelled,
     /// An ink layer was activated: a click on it once another app had the foreground (after
@@ -1476,8 +1481,8 @@ fn sift(
                 }
                 continue;
             }
-            crate::region::Choice::Chosen { screen, rect } => {
-                OverlayEvent::RegionChosen { screen, rect }
+            crate::region::Choice::Chosen { screen, rect, raw } => {
+                OverlayEvent::RegionChosen { screen, rect, raw }
             }
             crate::region::Choice::Cancelled => OverlayEvent::RegionCancelled,
         };
@@ -1492,6 +1497,38 @@ fn sift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolbar_recording_receives_unclipped_drag_but_screenshots_keep_the_clip() {
+        use crate::region::SelectionInput::{Down, Up};
+        use overmark_core::record::{PixelRect, PlaceError, place};
+        let mut c = crate::region::two_monitors();
+        // Drag left from the second display, whose local x becomes negative under capture.
+        let result = sift(
+            vec![],
+            vec![(1, Down(100, 100)), (1, Up(-100, 400))],
+            Some(&mut c),
+        );
+        assert!(result.ended);
+        let [OverlayEvent::RegionChosen { screen, rect, raw }] = result.out.as_slice() else {
+            panic!("one region outcome expected");
+        };
+        assert_eq!(*screen, 1);
+        assert_eq!(*rect, Rect::new(0, 100, 101, 401));
+        assert_eq!(*raw, Rect::new(-100, 100, 101, 401));
+        // The first monitor has a negative origin; the second starts at the origin.
+        let monitors = [
+            PixelRect::new(-1920, 0, 0, 1080),
+            PixelRect::new(0, 0, 2560, 1440),
+        ];
+        assert_eq!(
+            place(
+                PixelRect::new(raw.left, raw.top, raw.right, raw.bottom),
+                &monitors
+            ),
+            Err(PlaceError::SpansMonitors)
+        );
+    }
 
     /// The test message is a right-click on its screen's layer; a pointer message Windows
     /// knows nothing of (a pointer id that isn't live) is nothing at all.
@@ -1696,6 +1733,7 @@ mod tests {
         want.push(OverlayEvent::RegionChosen {
             screen: 1,
             rect: Rect::new(10, 10, 51, 61),
+            raw: Rect::new(10, 10, 51, 61),
         });
         assert_eq!((sifted.out, sifted.ended), (want, true));
         // Still choosing: sifted, and the monitor dragged on is shown again, once.

@@ -106,6 +106,30 @@ fn grab(m: &Monitor) -> Option<overmark_win::save::Image> {
     })
 }
 
+/// Shared validation before either recording mode creates any controls. Coordinates are
+/// physical pixels, so monitor DPI affects neither the origin translation nor placement.
+fn place_record_box(
+    monitors: &[Monitor],
+    screen: usize,
+    rect: Rect,
+) -> Result<PixelRect, RecordError> {
+    let monitor = monitors
+        .get(screen)
+        .ok_or(overmark_core::record::PlaceError::OffScreen)?;
+    let m = monitor.rect;
+    let area = PixelRect::new(
+        m.left + rect.left,
+        m.top + rect.top,
+        m.left + rect.right,
+        m.top + rect.bottom,
+    );
+    let rects: Vec<PixelRect> = monitors
+        .iter()
+        .map(|m| PixelRect::new(m.rect.left, m.rect.top, m.rect.right, m.rect.bottom))
+        .collect();
+    Ok(place(area, &rects)?.area)
+}
+
 impl App {
     /// The toolbar's Record: choose the box, as Save a region does.
     pub(super) fn begin_record(&mut self) {
@@ -120,7 +144,7 @@ impl App {
         }
     }
 
-    /// The box was chosen on the drawing layer's monitor `screen` (`rect` in its pixels).
+    /// The raw box chosen on the drawing layer's monitor `screen` (physical local pixels).
     pub(super) fn record_box_chosen(&mut self, screen: usize, rect: Rect) {
         self.pending_record = false;
         self.pending_region = None;
@@ -131,7 +155,8 @@ impl App {
         self.open_record_box(&monitors, screen, rect, false);
     }
 
-    /// Opens the box chosen on `monitors[screen]` (`rect` in its pixels): its outline and bar.
+    /// Validates the unclipped box chosen on `monitors[screen]` (physical local pixels), then
+    /// opens its outline and bar. Both recording entry points pass the original drag here.
     /// `screen_mode`: a screen recording, with no drawing layer.
     fn open_record_box(
         &mut self,
@@ -143,22 +168,10 @@ impl App {
         let Some(monitor) = monitors.get(screen).cloned() else {
             return;
         };
-        let m = monitor.rect;
-        let area = PixelRect::new(
-            m.left + rect.left,
-            m.top + rect.top,
-            m.left + rect.right,
-            m.top + rect.bottom,
-        );
-        let rects: Vec<PixelRect> = monitors
-            .iter()
-            .map(|m| PixelRect::new(m.rect.left, m.rect.top, m.rect.right, m.rect.bottom))
-            .collect();
         // What will be recorded: the box on its monitor, its sides even. Refused plainly.
-        let placed = match place(area, &rects) {
-            Ok(p) => p.area,
-            Err(e) => {
-                let error = RecordError::from(e);
+        let placed = match place_record_box(monitors, screen, rect) {
+            Ok(area) => area,
+            Err(error) => {
                 tracing::info!(?error, "the box can't be recorded");
                 self.toast_on(
                     Notice::Problem,
@@ -300,7 +313,9 @@ impl App {
             window::give_focus_back(h);
         }
         match picked {
-            Picked::Chosen { screen, rect } => self.open_record_box(&monitors, screen, rect, true),
+            Picked::Chosen { screen, raw, .. } => {
+                self.open_record_box(&monitors, screen, raw, true)
+            }
             Picked::Cancelled => tracing::info!("choosing a box to record cancelled"),
         }
     }
@@ -522,7 +537,39 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{HotkeyDoes, Notice, hotkey_does, notice_shows};
+    use super::*;
+
+    #[test]
+    fn recording_placement_uses_physical_bounds_on_mixed_dpi_monitors() {
+        use overmark_core::record::PlaceError;
+        overmark_core::i18n::init("en");
+        let monitor = |rect, dpi| Monitor {
+            handle: Default::default(),
+            name: String::new(),
+            rect,
+            work: rect,
+            dpi,
+            primary: false,
+        };
+        let monitors = [
+            monitor(Rect::new(-1920, -200, 0, 880), 96),
+            monitor(Rect::new(0, -200, 2560, 1240), 144),
+        ];
+        for (screen, raw) in [
+            (0, Rect::new(1800, 100, 2001, 401)),
+            (1, Rect::new(-100, 100, 101, 401)),
+        ] {
+            let error = place_record_box(&monitors, screen, raw).unwrap_err();
+            assert_eq!(error, RecordError::Place(PlaceError::SpansMonitors));
+            assert_eq!(error.message(), tr("record-error-two-monitors"));
+        }
+        // Both modes validate before creating a ready box. A valid drag on the 150% display
+        // remains in physical pixels, with only even-size rounding applied.
+        assert_eq!(
+            place_record_box(&monitors, 1, Rect::new(100, 100, 301, 401)).unwrap(),
+            PixelRect::new(100, -100, 300, 200)
+        );
+    }
 
     /// "Show a notice after each capture" turned off hides only a plain "saved": a problem, a
     /// recording that stopped by itself and the drawing layer's instruction always show.

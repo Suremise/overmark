@@ -1600,7 +1600,11 @@ the bar, the toolbar, the dim and the notice are excluded from capture, so it ne
 
 - **`overmark_win::region::Picker`**: choosing a box, moved out of the overlay. A selection
   window over each monitor shows a still image of it darkened, the box being dragged bright, the
-  hint and the size. A drag stays on its monitor; Esc cancels; `poll` gives `Picked`. The overlay
+  hint and the size. The preview and screenshot rectangle stay on the starting monitor;
+  outcomes also retain the raw drag in that monitor's physical pixels. Both recording entry
+  points translate those raw bounds to desktop pixels before placement, so a drag spanning
+  monitors shows the existing refusal instead of opening a clipped ready box. Esc cancels;
+  `poll` gives `Picked`. The overlay
   opens it over its composed images (and sifts the layers' events while it's up, as before); a
   mode without the layer opens it over plain grabs.
 - **`overmark_win::region::Outline`**: four thin windows round the box (`outline_strips`,

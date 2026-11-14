@@ -731,11 +731,11 @@ impl App {
                 self.flush();
                 self.capture(c);
             }
-            OverlayEvent::RegionChosen { screen, rect } if self.pending_record => {
-                self.record_box_chosen(screen, rect);
+            OverlayEvent::RegionChosen { screen, raw, .. } if self.pending_record => {
+                self.record_box_chosen(screen, raw);
                 self.raise_toolbar();
             }
-            OverlayEvent::RegionChosen { screen, rect } => {
+            OverlayEvent::RegionChosen { screen, rect, .. } => {
                 self.region_chosen(screen, rect);
                 self.raise_toolbar();
             }
