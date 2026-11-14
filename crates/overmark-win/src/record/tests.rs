@@ -729,10 +729,14 @@ fn a_publication_error_keeps_the_finished_partial_file() {
     assert!(matches!(&error, RecordError::File { path, .. }
         if *path == requested.display().to_string()));
     let reason = crate::win32::files::rename_no_replace(&part, &requested).unwrap_err();
+    // The system's text ends without a full stop ("... (os error 3)"), so the recovery sentence
+    // has to start on a line of its own rather than run on after it.
+    assert!(reason.to_string().ends_with(')'), "{reason}");
     assert_eq!(
         error.message(),
         format!(
-            "The video {} couldn't be written: {reason} The finished video is kept at: {}",
+            "The video {} couldn't be written: {reason}
+The finished video is kept at: {}",
             requested.display(),
             part.display()
         )
@@ -759,7 +763,8 @@ fn persistent_publication_collisions_are_bounded_and_keep_every_file() {
     assert_eq!(
         result.unwrap_err().message(),
         format!(
-            "The video {} couldn't be written: Other files kept taking the available names. The finished video is kept at: {}",
+            "The video {} couldn't be written: Other files kept taking the available names.
+The finished video is kept at: {}",
             requested.display(),
             part.display()
         )

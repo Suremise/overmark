@@ -15,8 +15,12 @@ record-error-encoding = The video couldn't be encoded: { $reason }
 # $path: the video's file.
 record-error-file = The video { $path } couldn't be written: { $reason }
 record-error-name-collisions = Other files kept taking the available names.
-# $reason: why publication failed; $partial: the actual retained partial file's full path.
-record-error-publication = { $reason } The finished video is kept at: { $partial }
+# $reason: why publication failed, as the system says it, which may end without punctuation;
+# $partial: the actual retained partial file's full path. The line break keeps the recovery
+# sentence apart from the reason whichever way the reason ends.
+record-error-publication =
+    { $reason }
+    The finished video is kept at: { $partial }
 
 ## The control bar on the box's top edge
 
