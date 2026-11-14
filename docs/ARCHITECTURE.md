@@ -1457,10 +1457,15 @@ size the encoder refuses is said with its reason (`record-error-encoder-refused`
    monitor's frame on the GPU (`CopySubresourceRegion` into a staging texture the box's size,
    kept between frames) and read back. On a turned monitor the box is found in the unturned
    texture (`capture::texture_area`, tested) and turned back.
-2. **A frame each tick.** Desktop Duplication gives a frame only when the screen changes, so the
-   thread writes one every 1/15, 1/24 or 1/30 s from the latest image: the file plays at a
-   constant rate, and a still screen repeats one buffer, which costs almost nothing to encode or
-   store. If the PC stalls for more than a second, the gap is one long frame, not a burst.
+2. **A frame each tick when the encoder keeps up.** Desktop Duplication gives a frame only when
+   the screen changes, so the thread normally writes one every 1/15, 1/24 or 1/30 s from the
+   latest image. A still screen repeats one buffer, which costs almost nothing to encode or
+   store. Before each subsequent write, even when overdue, the source is polled without
+   waiting: a slow encoder cannot starve fresh images or capture-loss detection. Missed frame
+   intervals become one longer sample of the latest image. Each turn writes at most one
+   sample before checking pause/stop again; no catch-up burst or queue of full-size images.
+   The duration stays on the frame-rate grid; `Saved::frames` counts actual encoded samples,
+   which can be fewer than the elapsed frame intervals.
 3. **Timestamps from real time** (the performance counter): frame `n` is at `n / fps` seconds of
    recorded time (`core::record::frame_time`, exact at 15 fps too). **A pause** stops the
    recorded clock (`core::record::Clock`): the paused time is taken off every later time, so

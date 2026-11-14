@@ -10,6 +10,176 @@ use overmark_core::record::UNITS_PER_SEC;
 /// The pattern's left half, BGRA: (R 200, G 100, B 50).
 const LEFT: [u8; 4] = [50, 100, 200, 255];
 
+/// A screen whose marker changes on every acquisition. Waiting advances the fake clock;
+/// encoding advances it too, so no wall-clock waits or hardware speed affect the schedule.
+struct ScheduledSource {
+    now: std::rc::Rc<std::cell::Cell<i64>>,
+    polls: usize,
+    fail_at: Option<usize>,
+    waits: Vec<u32>,
+}
+
+impl Source for ScheduledSource {
+    fn next(&mut self, timeout_ms: u32, scene: &mut Scene) -> Result<bool, RecordError> {
+        self.polls += 1;
+        self.waits.push(timeout_ms);
+        if self.fail_at == Some(self.polls) {
+            return Err(RecordError::CaptureLost("injected loss".into()));
+        }
+        self.now
+            .set(self.now.get() + i64::from(timeout_ms) * 10_000);
+        scene.image[0] = self.polls as u8;
+        Ok(true)
+    }
+}
+
+struct Schedule {
+    /// Marker, start and duration of each sample handed to the injected encoder.
+    samples: Vec<(u8, i64, i64)>,
+    source: ScheduledSource,
+    error: Option<RecordError>,
+    written: u64,
+}
+
+/// `delays`: time each encoder write consumes, repeating the last value once exhausted.
+fn scheduled(delays: &[i64], turns: usize, fail_at: Option<usize>) -> Schedule {
+    let now = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut source = ScheduledSource {
+        now: now.clone(),
+        polls: 0,
+        fail_at,
+        waits: Vec::new(),
+    };
+    let mut scene = Scene {
+        width: 1,
+        height: 1,
+        image: vec![0; 4],
+        pointer: None,
+        shape: None,
+    };
+    let mut samples = Vec::new();
+    let (mut written, mut dirty, mut cached, mut error) = (0, true, 0, None);
+    for _ in 0..turns {
+        let result = record_turn(
+            now.get(),
+            FrameRate::Fps30,
+            &mut written,
+            &mut source,
+            &mut scene,
+            &mut dirty,
+            |upto, written, dirty, scene| {
+                if *dirty {
+                    cached = scene.image[0];
+                    *dirty = false;
+                }
+                write_frames(written, upto, FrameRate::Fps30, |time, duration| {
+                    let delay = delays[samples.len().min(delays.len() - 1)];
+                    samples.push((cached, time, duration));
+                    now.set(now.get() + delay);
+                    Ok(())
+                })
+            },
+        );
+        if let Err(e) = result {
+            error = Some(e);
+            break;
+        }
+    }
+    Schedule {
+        samples,
+        source,
+        error,
+        written,
+    }
+}
+
+#[test]
+fn a_slow_encoder_keeps_receiving_fresh_screen_images() {
+    let s = scheduled(&[400_000], 40, None); // 40 ms per write, at 30 fps.
+    assert!(s.error.is_none());
+    assert!(s.source.polls >= 39, "only {} screen polls", s.source.polls);
+    assert_eq!(
+        s.samples.len(),
+        40,
+        "catch-up must not burst into many writes"
+    );
+    assert!(s.samples.windows(2).all(|w| w[1].0 > w[0].0));
+    assert!(s.source.waits.iter().all(|&ms| ms == 0));
+    for pair in s.samples.windows(2) {
+        assert_eq!(pair[0].1 + pair[0].2, pair[1].1, "no timeline gap");
+    }
+    let last = s.samples.last().unwrap();
+    assert_eq!(last.1 + last.2, frame_time(s.written, FrameRate::Fps30));
+}
+
+#[test]
+fn a_single_long_stall_refreshes_the_image_before_coalescing_the_gap() {
+    let s = scheduled(&[3 * UNITS_PER_SEC, 0], 8, None);
+    assert!(s.error.is_none());
+    assert!(
+        s.samples[1].0 > s.samples[0].0,
+        "catch-up encoded a stale image"
+    );
+    assert!(s.samples[1].2 >= 2 * UNITS_PER_SEC);
+    assert!(s.samples.len() <= 8);
+    assert!(
+        s.source.waits.iter().any(|&ms| ms > 0),
+        "normal pacing resumes"
+    );
+    for pair in s.samples.windows(2) {
+        assert_eq!(pair[0].1 + pair[0].2, pair[1].1);
+    }
+}
+
+#[test]
+fn capture_loss_is_observed_while_the_encoder_is_behind() {
+    let s = scheduled(&[400_000], 40, Some(3));
+    assert!(matches!(s.error, Some(RecordError::CaptureLost(_))));
+    assert_eq!(s.source.polls, 3);
+    assert!(
+        s.samples.len() <= 3,
+        "no further encoding after capture loss"
+    );
+}
+
+#[test]
+fn coalesced_samples_play_with_their_full_duration_and_new_image() {
+    let dir = tempfile::tempdir().unwrap();
+    for rate in FrameRate::ALL {
+        let path = dir.path().join(format!("coalesced-{}.mp4", rate.fps()));
+        let settings = RecordSettings {
+            frame_rate: rate,
+            ..RecordSettings::default()
+        };
+        let mut writer = Mp4Writer::create(&path, &video_format(48, 48, &settings), false).unwrap();
+        let mut written = 0;
+        let mut yuv = vec![0; nv12::len(48, 48)];
+        let later = [160, 60, 40, 255];
+        for (upto, colour) in [(1, LEFT), (10, later)] {
+            nv12::from_bgra(&colour.repeat(48 * 48), 48, 48, &mut yuv);
+            let buffer = writer.frame(&yuv).unwrap();
+            write_frames(&mut written, upto, rate, |time, duration| {
+                writer
+                    .write(&buffer, time, duration)
+                    .map_err(|e| RecordError::Encoding(e.message()))
+            })
+            .unwrap();
+        }
+        writer.finish().unwrap();
+        let info = mf::probe(&path).unwrap();
+        assert_eq!(info.frames, 2, "missed intervals are one sample");
+        assert!((info.duration_100ns - frame_time(10, rate)).abs() < 20_000);
+        let (w, h, image) = mf::decode_frame_at(&path, frame_time(5, rate)).unwrap();
+        assert_eq!((w, h), (48, 48));
+        assert!(
+            image[..3]
+                .iter()
+                .zip(later)
+                .all(|(&a, b)| a.abs_diff(b) <= 8)
+        );
+    }
+}
+
 /// A test pattern: the left half [`LEFT`], the right half black with a white bar that moves
 /// every 100 ms. After `fail_after`, if set, it fails as a lost screen would.
 struct Pattern {
@@ -127,12 +297,11 @@ fn records_a_pattern_to_an_mp4_that_plays_back() {
     assert!(!part_path(&saved.path, 1).exists(), "the .part was left");
     assert_eq!(saved.ended_by, None);
     assert_eq!(saved.bytes, std::fs::metadata(&saved.path).unwrap().len());
-    // Every frame of 15 a second, up to the stop.
+    // The duration stays on the frame grid. A delayed writer may coalesce intervals, so
+    // the actual sample count is at most the number of frame intervals in that duration.
     let period = 1.0 / 15.0;
-    assert_eq!(
-        saved.frames,
-        (saved.duration.as_secs_f64() / period).round() as u64
-    );
+    assert!(saved.frames > 0);
+    assert!(saved.frames <= (saved.duration.as_secs_f64() / period).round() as u64);
     let late = saved.duration.as_secs_f64() - elapsed.as_secs_f64();
     assert!(
         (-0.001..0.5).contains(&late),
@@ -209,11 +378,9 @@ fn a_pause_leaves_no_gap() {
     );
     let info = mf::probe(&saved.path).unwrap();
     assert_eq!(info.frames, saved.frames);
-    assert_eq!(
-        saved.frames,
-        (recorded * 30.0).round() as u64,
-        "frames should be evenly spaced at 30 fps"
-    );
+    assert!(saved.frames > 0);
+    assert!(saved.frames <= (recorded * 30.0).round() as u64);
+    assert!((recorded * 30.0 - (recorded * 30.0).round()).abs() < 0.0001);
 }
 
 #[test]

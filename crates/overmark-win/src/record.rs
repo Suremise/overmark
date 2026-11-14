@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use overmark_core::record::pointer::{self, Shape};
 use overmark_core::record::{
-    self as core_record, Clock, frame_duration, frame_time, frames_at_stop, frames_started, nv12,
+    self as core_record, Clock, frame_time, frames_at_stop, frames_started, nv12,
 };
 pub use overmark_core::record::{FrameRate, PixelRect, Quality, RecordError, RecordSettings};
 
@@ -72,6 +72,7 @@ pub struct Saved {
     pub path: PathBuf,
     /// The video's length (the time recorded, to the frame).
     pub duration: Duration,
+    /// Encoded samples. A delayed turn coalesces missed frame intervals into one sample.
     pub frames: u64,
     pub bytes: u64,
     /// What was recorded: the box as placed (on its monitor, even-sized).
@@ -142,6 +143,51 @@ trait Source {
 }
 
 type MakeSource = Box<dyn FnOnce() -> Result<Box<dyn Source>, RecordError> + Send>;
+
+/// One scheduling turn. The caller checks pause/stop and supplies active recording time;
+/// the writer is supplied so backpressure can be tested with a clock advanced by each write.
+fn record_turn(
+    active: i64,
+    rate: FrameRate,
+    written: &mut u64,
+    source: &mut dyn Source,
+    scene: &mut Scene,
+    dirty: &mut bool,
+    mut write: impl FnMut(u64, &mut u64, &mut bool, &Scene) -> Result<(), RecordError>,
+) -> Result<(), RecordError> {
+    let due = frames_started(active, rate);
+    if due > *written {
+        // A slow writer can keep every turn overdue. Always acquire the latest image before
+        // writing again, even then; zero timeout avoids adding a wait to the backlog. The
+        // first image was already acquired during setup, before the recording clock started.
+        if *written != 0 {
+            *dirty |= source.next(0, scene)?;
+        }
+        write(due, written, dirty, scene)?;
+        return Ok(());
+    }
+    let wait_100ns = frame_time(*written, rate) - active;
+    let timeout_ms = (wait_100ns.div_euclid(10_000) + 1).clamp(1, 1000) as u32;
+    *dirty |= source.next(timeout_ms, scene)?;
+    Ok(())
+}
+
+/// Writes at most one sample per turn, covering the frame intervals up to `upto`. Coalescing
+/// missed intervals prevents a burst of slow writes from delaying capture and pause/stop.
+fn write_frames(
+    written: &mut u64,
+    upto: u64,
+    rate: FrameRate,
+    mut write: impl FnMut(i64, i64) -> Result<(), RecordError>,
+) -> Result<(), RecordError> {
+    if upto <= *written {
+        return Ok(());
+    }
+    let t = frame_time(*written, rate);
+    write(t, frame_time(upto, rate) - t)?;
+    *written = upto;
+    Ok(())
+}
 
 /// One monitor's Desktop Duplication, cut to the box.
 struct ScreenSource {
@@ -524,8 +570,8 @@ fn run(
     let _ = ready.send(Ok(encoder.clone()));
 
     let rate = settings.frame_rate;
-    let fps = u64::from(rate.fps());
     let mut written = 0u64;
+    let mut samples_written = 0u64;
     let mut frame: Option<FrameBuffer> = None;
     let mut dirty = true;
     let mut work = Vec::new();
@@ -547,8 +593,8 @@ fn run(
             .map_err(|e| RecordError::Encoding(e.message()))
     };
 
-    // Writes frames `written..upto`, the current scene; more than a second behind (the PC
-    // stalled), the gap is one long frame rather than a burst of repeats.
+    // Writes the current scene over intervals `written..upto`. Missed intervals become one
+    // long sample rather than a burst of repeats; `written` remains the timeline position.
     let mut write_upto = |upto: u64,
                           written: &mut u64,
                           frame: &mut Option<FrameBuffer>,
@@ -565,20 +611,11 @@ fn run(
         }
         let buffer = frame.as_ref().expect("a frame");
         let encode = |e: windows::core::Error| RecordError::Encoding(e.message());
-        if upto - *written > fps {
-            let t = frame_time(*written, rate);
-            writer
-                .write(buffer, t, frame_time(upto, rate) - t)
-                .map_err(encode)?;
-        } else {
-            for n in *written..upto {
-                writer
-                    .write(buffer, frame_time(n, rate), frame_duration(n, rate))
-                    .map_err(encode)?;
-            }
-        }
-        *written = upto;
-        Ok(())
+        write_frames(written, upto, rate, |time, duration| {
+            writer.write(buffer, time, duration).map_err(encode)?;
+            samples_written += 1;
+            Ok(())
+        })
     };
 
     let (how, stop_at) = loop {
@@ -595,29 +632,19 @@ fn run(
             }
             state.clock.active(clock::now_100ns())
         };
-        let due = frames_started(active, rate);
-        if due > written {
-            if let Err(e) = write_upto(
-                due,
-                &mut written,
-                &mut frame,
-                &mut dirty,
-                &scene,
-                &mut writer,
-            ) {
-                ended_by = Some(e);
-                break (Stop::Save, clock::now_100ns());
-            }
-            continue;
-        }
-        let wait_100ns = frame_time(written, rate) - active;
-        let timeout_ms = (wait_100ns.div_euclid(10_000) + 1).clamp(1, 1000) as u32;
-        match source.next(timeout_ms, &mut scene) {
-            Ok(changed) => dirty |= changed,
-            Err(e) => {
-                ended_by = Some(e);
-                break (Stop::Save, clock::now_100ns());
-            }
+        if let Err(e) = record_turn(
+            active,
+            rate,
+            &mut written,
+            source.as_mut(),
+            &mut scene,
+            &mut dirty,
+            |due, written, dirty, scene| {
+                write_upto(due, written, &mut frame, dirty, scene, &mut writer)
+            },
+        ) {
+            ended_by = Some(e);
+            break (Stop::Save, clock::now_100ns());
         }
     };
 
@@ -656,7 +683,7 @@ fn run(
                 Ok(Saved {
                     path,
                     duration: Duration::from_nanos(duration_100ns as u64 * 100),
-                    frames: written,
+                    frames: samples_written,
                     bytes,
                     area,
                     encoder,

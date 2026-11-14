@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::win32::mf::RateControl;
+use overmark_core::record::frame_duration;
 
 /// A fixed pseudo-random number for a few coordinates.
 fn hash(a: u32, b: u32, c: u32) -> u32 {
