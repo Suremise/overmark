@@ -463,13 +463,25 @@ fn publish_with(
         match move_file(part, &path) {
             Ok(()) => return Ok(path),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(file_error(&path, e)),
+            Err(e) => return Err(publication_error(&path, part, e)),
         }
     }
-    Err(file_error(
+    Err(publication_error(
         requested,
+        part,
         crate::core::i18n::tr("record-error-name-collisions"),
     ))
+}
+
+fn publication_error(path: &Path, part: &Path, e: impl std::fmt::Display) -> RecordError {
+    file_error(
+        path,
+        crate::core::tr!(
+            "record-error-publication",
+            reason = e.to_string(),
+            partial = part.display().to_string()
+        ),
+    )
 }
 
 fn file_error(path: &Path, e: impl std::fmt::Display) -> RecordError {

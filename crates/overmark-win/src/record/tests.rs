@@ -717,7 +717,7 @@ fn publishing_keeps_files_created_after_name_selection() {
 #[test]
 fn a_publication_error_keeps_the_finished_partial_file() {
     let dir = tempfile::tempdir().unwrap();
-    let part = dir.path().join("clip.mp4.part");
+    let part = dir.path().join("clip (2).mp4.part");
     std::fs::write(&part, b"finished video").unwrap();
     let requested = dir.path().join("missing-folder").join("clip.mp4");
     let mut calls = 0;
@@ -725,8 +725,18 @@ fn a_publication_error_keeps_the_finished_partial_file() {
         calls += 1;
         crate::win32::files::rename_no_replace(from, to)
     });
-    assert!(matches!(result, Err(RecordError::File { path, .. })
-        if path == requested.display().to_string()));
+    let error = result.unwrap_err();
+    assert!(matches!(&error, RecordError::File { path, .. }
+        if *path == requested.display().to_string()));
+    let reason = crate::win32::files::rename_no_replace(&part, &requested).unwrap_err();
+    assert_eq!(
+        error.message(),
+        format!(
+            "The video {} couldn't be written: {reason} The finished video is kept at: {}",
+            requested.display(),
+            part.display()
+        )
+    );
     assert_eq!(calls, 1, "only name collisions should retry");
     assert_eq!(std::fs::read(&part).unwrap(), b"finished video");
     assert!(!requested.exists());
@@ -736,7 +746,9 @@ fn a_publication_error_keeps_the_finished_partial_file() {
 fn persistent_publication_collisions_are_bounded_and_keep_every_file() {
     let dir = tempfile::tempdir().unwrap();
     let requested = dir.path().join("clip.mp4");
+    let occupied_part = reserve_part(&requested).unwrap();
     let part = reserve_part(&requested).unwrap();
+    assert_ne!(part, occupied_part);
     std::fs::write(&part, b"finished video").unwrap();
     let mut theirs = Vec::new();
     let result = publish_with(&part, &requested, |from, to| {
@@ -744,7 +756,14 @@ fn persistent_publication_collisions_are_bounded_and_keep_every_file() {
         theirs.push(to.to_owned());
         crate::win32::files::rename_no_replace(from, to)
     });
-    assert!(matches!(result, Err(RecordError::File { .. })));
+    assert_eq!(
+        result.unwrap_err().message(),
+        format!(
+            "The video {} couldn't be written: Other files kept taking the available names. The finished video is kept at: {}",
+            requested.display(),
+            part.display()
+        )
+    );
     assert_eq!(theirs.len(), 100);
     assert_eq!(std::fs::read(&part).unwrap(), b"finished video");
     for path in theirs {
