@@ -6,6 +6,10 @@ All notable changes to Overmark are recorded here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- Start with Windows now shows startup enabled by a machine-wide installer and explains why it cannot be turned off in the app.
+
 ## [0.3.0] - 2026-11-07
 
 Record a part of the screen to a small MP4 video, while you draw on it or while you use your

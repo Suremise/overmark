@@ -30,7 +30,7 @@ use overmark_core::hotkey_status::Status;
 use overmark_core::i18n::tr;
 use overmark_core::settings::{Settings, Warning};
 use overmark_core::tr;
-use overmark_win::autostart::{AutoStart, VALUE_NAME};
+use overmark_win::autostart::{AutoStart, StartupState, VALUE_NAME};
 use overmark_win::paths::{AppPaths, Mode};
 use overmark_win::win32::tray::{self, InstanceLock, NamedEvent};
 
@@ -75,7 +75,7 @@ impl Page {
 /// What the window does to the world: Windows' in the app, a recording fake in the tests.
 pub trait Host {
     /// Whether Overmark starts with Windows (the Run value, which is what counts).
-    fn autostart(&self) -> bool;
+    fn autostart(&self) -> StartupState;
     fn set_autostart(&self, on: bool) -> Result<(), String>;
     /// Opens a folder in Explorer, or a link in the browser.
     fn open(&self, target: &str) -> bool;
@@ -97,10 +97,10 @@ pub struct WinHost {
 }
 
 impl Host for WinHost {
-    fn autostart(&self) -> bool {
+    fn autostart(&self) -> StartupState {
         match std::env::current_exe() {
-            Ok(exe) => AutoStart::new(VALUE_NAME).starts(&exe).unwrap_or(false),
-            Err(_) => false,
+            Ok(exe) => AutoStart::new(VALUE_NAME).state(&exe),
+            Err(_) => StartupState::UNKNOWN,
         }
     }
 
@@ -282,20 +282,22 @@ impl SettingsApp {
         }
     }
 
-    /// Puts every setting back to its default (and Start with Windows off).
+    /// Resets settings and per-user startup, explaining any startup that cannot be changed.
     pub(crate) fn reset(&mut self) {
         self.settings = Settings::default();
         self.edit = None;
         self.pattern_draft = None;
-        if self.host.autostart()
-            && let Err(e) = self.host.set_autostart(false)
-        {
-            self.autostart_error = Some(tr!("settings-autostart-failed", reason = e));
-        }
+        self.set_autostart(false);
     }
 
     /// Turns Start with Windows on or off, and keeps the setting beside it in step.
     pub(crate) fn set_autostart(&mut self, on: bool) {
+        let state = self.host.autostart();
+        if !state.changeable() {
+            self.settings.general.start_with_windows = state.enabled();
+            self.autostart_error = Some(tr(autostart_help(state)));
+            return;
+        }
         match self.host.set_autostart(on) {
             Ok(()) => {
                 self.autostart_error = None;
@@ -447,5 +449,16 @@ pub fn run(page: Page) -> i32 {
             tracing::error!(error = %text, "Settings couldn't open");
             1
         }
+    }
+}
+
+/// The explanation shared by the startup control and Reset.
+fn autostart_help(state: StartupState) -> &'static str {
+    if state.managed() {
+        "settings-autostart-managed"
+    } else if !state.changeable() {
+        "settings-autostart-unavailable"
+    } else {
+        "settings-start-with-windows-help"
     }
 }

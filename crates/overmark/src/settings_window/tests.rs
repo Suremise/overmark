@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use eframe::egui::accesskit::Role;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use overmark_core::hotkey::Hotkey;
 use overmark_core::hotkey_status::{State, Status};
 use overmark_core::i18n::tr;
@@ -27,6 +27,7 @@ use crate::config::Startup;
 #[derive(Default)]
 struct Record {
     autostart: bool,
+    startup_override: Option<overmark_win::autostart::StartupState>,
     opened: Vec<String>,
     reloads: u32,
     /// Hotkeys other apps have.
@@ -40,8 +41,14 @@ struct Record {
 struct Fake(Rc<RefCell<Record>>);
 
 impl Host for Fake {
-    fn autostart(&self) -> bool {
-        self.0.borrow().autostart
+    fn autostart(&self) -> overmark_win::autostart::StartupState {
+        let record = self.0.borrow();
+        record
+            .startup_override
+            .unwrap_or(overmark_win::autostart::StartupState {
+                per_user: Some(record.autostart),
+                machine: Some(false),
+            })
     }
     fn set_autostart(&self, on: bool) -> Result<(), String> {
         self.0.borrow_mut().autostart = on;
@@ -673,5 +680,61 @@ fn typing_in_a_value_box_keeps_its_width_and_the_range() {
         h.run();
         assert_eq!(s.saved().drawing.widths.pen, kept, "typed {typed}");
         assert_eq!(value_box(&h, "settings-width-pen"), before);
+    }
+}
+
+#[test]
+fn machine_startup_and_unavailable_reads_are_explained_and_reset_cannot_claim_off() {
+    use overmark_win::autostart::StartupState;
+    for state in [
+        StartupState {
+            per_user: Some(false),
+            machine: Some(true),
+        },
+        StartupState {
+            per_user: Some(true),
+            machine: Some(true),
+        },
+        StartupState::UNKNOWN,
+        StartupState {
+            per_user: Some(true),
+            machine: None,
+        },
+    ] {
+        let s = Setup::new();
+        s.fake.0.borrow_mut().startup_override = Some(state);
+        let mut h = s.window(Page::General);
+        let explanation = tr(super::autostart_help(state));
+        let label = tr("settings-start-with-windows");
+        let toggle = h.get_by_label(&label);
+        assert_eq!(
+            toggle.accesskit_node().description().as_deref(),
+            Some(explanation.as_str())
+        );
+        assert_eq!(
+            toggle.accesskit_node().data().toggled(),
+            Some(if state.enabled() {
+                eframe::egui::accesskit::Toggled::True
+            } else {
+                eframe::egui::accesskit::Toggled::False
+            })
+        );
+        assert!(
+            h.get_by_label(&tr("settings-start-with-windows"))
+                .accesskit_node()
+                .is_disabled()
+        );
+        h.state_mut().reset();
+        h.run();
+        assert_eq!(
+            h.state().autostart_error.as_deref(),
+            Some(explanation.as_str())
+        );
+        assert_eq!(
+            h.state().settings.general.start_with_windows,
+            state.enabled()
+        );
+        assert_eq!(s.fake.autostart(), state);
+        assert!(!s.fake.0.borrow().autostart, "no per-user mutation");
     }
 }

@@ -70,3 +70,6 @@ update-failed-body = { $reason }
 update-failed-status = GitHub answered { $status } instead of the latest release.
 # $version: this version ("0.1.0").
 update-failed-version = This version ({ $version }) can't be compared with GitHub's.
+
+tray-start-with-windows-managed = Start with Windows (managed by installer)…
+tray-start-with-windows-unavailable = Start with Windows (status unavailable)…

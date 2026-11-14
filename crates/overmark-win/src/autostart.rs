@@ -1,17 +1,11 @@
-//! Start with Windows: a value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-//! that starts an exe when the user logs on. Per user, no admin rights.
-//!
-//! Copied from Replica's `replica-win/src/autostart.rs` as it is (generic: the value's name and
-//! the exe's arguments are parameters). Overmark's value is [`VALUE_NAME`], with no arguments:
-//! the same value the MSI's `STARTWITHWINDOWS=1` writes (installer/overmark.wxs), so the setting
-//! shows it ticked and can untick it.
+//! Start with Windows: per-user entries are writable; machine entries are read-only.
 
 use std::io;
 use std::path::Path;
 
 use crate::win32::registry;
 
-/// The Run key, under `HKEY_CURRENT_USER`.
+/// The Run key, read under HKCU and HKLM; only HKCU is written.
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 /// Overmark's value in the Run key (matching the MSI's).
@@ -19,6 +13,58 @@ pub const VALUE_NAME: &str = "Overmark";
 
 /// Where tests keep their own keys, under `HKEY_CURRENT_USER`: never the Run key.
 pub const TEST_KEYS: &str = r"Software\OvermarkTest";
+
+/// Observed startup sources. `None` means that source could not be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupState {
+    pub per_user: Option<bool>,
+    pub machine: Option<bool>,
+}
+
+impl StartupState {
+    pub const OFF: Self = Self {
+        per_user: Some(false),
+        machine: Some(false),
+    };
+    pub const UNKNOWN: Self = Self {
+        per_user: None,
+        machine: None,
+    };
+
+    pub fn enabled(self) -> bool {
+        self.per_user == Some(true) || self.machine == Some(true)
+    }
+
+    pub fn managed(self) -> bool {
+        self.machine == Some(true)
+    }
+
+    pub fn changeable(self) -> bool {
+        self.per_user.is_some() && self.machine == Some(false)
+    }
+}
+
+trait Store {
+    fn read(&self, machine: bool) -> io::Result<Option<String>>;
+    fn write(&self, command: &str) -> io::Result<()>;
+    fn remove(&self) -> io::Result<()>;
+}
+
+impl Store for AutoStart {
+    fn read(&self, machine: bool) -> io::Result<Option<String>> {
+        if machine {
+            registry::get_machine_string(&self.key, &self.value)
+        } else {
+            self.command()
+        }
+    }
+    fn write(&self, command: &str) -> io::Result<()> {
+        registry::set_string(&self.key, &self.value, command)
+    }
+    fn remove(&self) -> io::Result<()> {
+        self.disable()
+    }
+}
 
 /// One app's entry in the Run key (or, in tests, in a key of their own).
 #[derive(Debug, Clone)]
@@ -38,8 +84,7 @@ impl AutoStart {
         }
     }
 
-    /// That, under `HKCU\<key>` instead of the Run key: for tests, so they never touch what
-    /// runs at logon.
+    /// Uses `key` in both hives instead of the Run key, for isolated tests.
     pub fn in_key(mut self, key: &str) -> Self {
         self.key = key.to_owned();
         self
@@ -61,9 +106,36 @@ impl AutoStart {
         registry::get_string(&self.key, &self.value)
     }
 
-    /// Whether it's there and starts `exe` with its arguments.
+    /// The effective startup sources, preserving read failures as unknown.
+    pub fn state(&self, exe: &Path) -> StartupState {
+        self.state_in(exe, self)
+    }
+
+    fn state_in(&self, exe: &Path, store: &impl Store) -> StartupState {
+        let matches = |machine| {
+            store.read(machine).ok().map(|command| {
+                command.is_some_and(|c| c.eq_ignore_ascii_case(&self.command_for(exe)))
+            })
+        };
+        StartupState {
+            per_user: matches(false),
+            machine: matches(true),
+        }
+    }
+
+    /// Whether either readable source starts this executable.
     pub fn starts(&self, exe: &Path) -> io::Result<bool> {
-        Ok(self.command()?.is_some_and(|c| c == self.command_for(exe)))
+        let state = self.state(exe);
+        if state.enabled() {
+            Ok(true)
+        } else if state.per_user.is_none() || state.machine.is_none() {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                overmark_core::i18n::tr("settings-autostart-unavailable"),
+            ))
+        } else {
+            Ok(false)
+        }
     }
 
     /// Starts `exe` when the user logs on.
@@ -71,7 +143,7 @@ impl AutoStart {
         registry::set_string(&self.key, &self.value, &self.command_for(exe))
     }
 
-    /// Stops starting with Windows. Not there already is fine.
+    /// Removes the per-user entry only. Not there already is fine.
     pub fn disable(&self) -> io::Result<()> {
         registry::delete_value(&self.key, &self.value).map(|_| ())
     }
@@ -81,11 +153,28 @@ impl AutoStart {
     /// removes an entry that starts an exe of `exe`'s file name, so an entry of the same name
     /// that belongs to something else is left alone.
     pub fn apply(&self, on: bool, exe: &Path) -> io::Result<()> {
-        match (on, self.starts(exe)?) {
-            (true, false) => self.enable(exe),
-            (false, _) if self.command()?.is_some_and(|c| same_file_name(&c, exe)) => {
-                self.disable()
-            }
+        self.apply_in(on, exe, self)
+    }
+
+    fn apply_in(&self, on: bool, exe: &Path, store: &impl Store) -> io::Result<()> {
+        // Read both sources before writing anything. Never claim to disable a machine entry.
+        let machine = store.read(true)?;
+        let user = store.read(false)?;
+        let command = self.command_for(exe);
+        if machine.is_some_and(|c| c.eq_ignore_ascii_case(&command)) {
+            return if on {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    overmark_core::i18n::tr("settings-autostart-managed"),
+                ))
+            };
+        }
+        match (on, user) {
+            (true, Some(c)) if c.eq_ignore_ascii_case(&command) => Ok(()),
+            (true, _) => store.write(&command),
+            (false, Some(c)) if same_file_name(&c, exe) => store.remove(),
             _ => Ok(()),
         }
     }
@@ -130,6 +219,132 @@ pub fn delete_test_key(name: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakeStore {
+        user: std::cell::RefCell<Option<String>>,
+        machine: Option<String>,
+        denied: Option<bool>,
+        writes: std::cell::Cell<usize>,
+    }
+    impl Store for FakeStore {
+        fn read(&self, machine: bool) -> io::Result<Option<String>> {
+            if self.denied == Some(machine) {
+                return Err(io::Error::from_raw_os_error(5));
+            }
+            Ok(if machine {
+                self.machine.clone()
+            } else {
+                self.user.borrow().clone()
+            })
+        }
+        fn write(&self, command: &str) -> io::Result<()> {
+            self.writes.set(self.writes.get() + 1);
+            *self.user.borrow_mut() = Some(command.to_owned());
+            Ok(())
+        }
+        fn remove(&self) -> io::Result<()> {
+            self.writes.set(self.writes.get() + 1);
+            *self.user.borrow_mut() = None;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn startup_sources_and_writes_use_both_hives_without_touching_machine_entries() {
+        let entry = AutoStart::new(VALUE_NAME);
+        let exe = Path::new(r"C:\Program Files\Overmark\overmark.exe");
+        let command = entry.command_for(exe);
+        let unrelated = r#""C:\Other\other.exe""#.to_owned();
+        for (user, machine, expected) in [
+            (None, None, StartupState::OFF),
+            (
+                Some(command.clone()),
+                None,
+                StartupState {
+                    per_user: Some(true),
+                    machine: Some(false),
+                },
+            ),
+            (
+                None,
+                Some(command.clone()),
+                StartupState {
+                    per_user: Some(false),
+                    machine: Some(true),
+                },
+            ),
+            (
+                Some(command.clone()),
+                Some(command.to_uppercase()),
+                StartupState {
+                    per_user: Some(true),
+                    machine: Some(true),
+                },
+            ),
+            (
+                Some(unrelated.clone()),
+                Some(unrelated.clone()),
+                StartupState::OFF,
+            ),
+        ] {
+            let store = FakeStore {
+                user: user.clone().into(),
+                machine: machine.clone(),
+                denied: None,
+                writes: 0.into(),
+            };
+            assert_eq!(entry.state_in(exe, &store), expected);
+            let disabled = entry.apply_in(false, exe, &store);
+            assert_eq!(disabled.is_err(), expected.managed());
+            if expected.managed() {
+                assert_eq!(*store.user.borrow(), user);
+                assert_eq!(store.writes.get(), 0);
+                assert!(entry.state_in(exe, &store).enabled());
+            } else {
+                assert!(!entry.state_in(exe, &store).enabled());
+                if user.as_ref() == Some(&unrelated) {
+                    assert_eq!(*store.user.borrow(), user);
+                }
+            }
+            entry.apply_in(true, exe, &store).unwrap();
+            assert!(entry.state_in(exe, &store).enabled());
+            assert_eq!(store.machine, machine);
+            if expected.managed() {
+                assert_eq!(store.writes.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn denied_reads_are_unknown_and_prevent_writes_even_when_other_source_is_enabled() {
+        let entry = AutoStart::new(VALUE_NAME);
+        let exe = Path::new(r"C:\Overmark\overmark.exe");
+        for denied in [false, true] {
+            for other_enabled in [false, true] {
+                let command = other_enabled.then(|| entry.command_for(exe));
+                let store = FakeStore {
+                    user: command.clone().into(),
+                    machine: command,
+                    denied: Some(denied),
+                    writes: 0.into(),
+                };
+                let state = entry.state_in(exe, &store);
+                assert!(!state.changeable());
+                assert_eq!(state.enabled(), other_enabled);
+                assert_eq!(
+                    if denied {
+                        state.machine
+                    } else {
+                        state.per_user
+                    },
+                    None
+                );
+                assert!(entry.apply_in(false, exe, &store).is_err());
+                assert!(entry.apply_in(true, exe, &store).is_err());
+                assert_eq!(store.writes.get(), 0);
+            }
+        }
+    }
 
     /// A test's own key, removed when dropped (also in a failed assertion's unwinding).
     struct Own(String);

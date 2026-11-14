@@ -12,7 +12,7 @@ use overmark_core::i18n::tr;
 use overmark_core::settings::{Settings, TrayClick};
 use overmark_core::tr;
 use overmark_core::update::Outcome;
-use overmark_win::autostart::{AutoStart, VALUE_NAME};
+use overmark_win::autostart::{AutoStart, StartupState, VALUE_NAME};
 use overmark_win::overlay::{Backdrop, Command};
 use overmark_win::update::CheckError;
 use overmark_win::win32::shared_text::SharedText;
@@ -250,7 +250,7 @@ impl App {
             Ok(Some(h)) => format!("{}\t{}", tr(key), h.display()),
             _ => tr(key),
         };
-        let starts = autostart_on();
+        let starts = autostart_state();
         let items = menu_items(&self.settings, starts, label);
         match self.tray.show_menu(&items, x, y) {
             Ok(Some(MENU_DRAW)) => self.open(Backdrop::Live, clock::now_100ns()),
@@ -259,7 +259,10 @@ impl App {
             Ok(Some(MENU_RECORD_REGION)) => self.record_region_hotkey(),
             Ok(Some(MENU_OPEN_CAPTURES)) => self.open_captures(),
             Ok(Some(MENU_SETTINGS)) => self.open_settings(Page::General),
-            Ok(Some(MENU_START_WITH_WINDOWS)) => self.toggle_autostart(!starts),
+            Ok(Some(MENU_START_WITH_WINDOWS)) if starts.changeable() => {
+                self.toggle_autostart(!starts.enabled());
+            }
+            Ok(Some(MENU_START_WITH_WINDOWS)) => self.open_settings(Page::General),
             Ok(Some(MENU_CHECK_UPDATES)) => self.check_updates(true),
             Ok(Some(MENU_ABOUT)) => self.open_settings(Page::About),
             Ok(Some(MENU_QUIT)) => return false,
@@ -543,18 +546,17 @@ impl App {
     }
 }
 
-/// Whether the Run value starts this exe.
-fn autostart_on() -> bool {
+/// Startup sources, including machine-wide entries and unavailable reads.
+fn autostart_state() -> StartupState {
     std::env::current_exe()
-        .ok()
-        .and_then(|exe| AutoStart::new(VALUE_NAME).starts(&exe).ok())
-        .unwrap_or(false)
+        .map(|exe| AutoStart::new(VALUE_NAME).state(&exe))
+        .unwrap_or(StartupState::UNKNOWN)
 }
 
 /// The menu's items: "Check for updates…" only when it's turned on.
 pub fn menu_items(
     settings: &Settings,
-    starts_with_windows: bool,
+    startup: StartupState,
     label: impl Fn(&str, &str) -> String,
 ) -> Vec<MenuItem> {
     let command = |id, text| MenuItem::Command { id, text };
@@ -580,8 +582,14 @@ pub fn menu_items(
         command(MENU_SETTINGS, tr("tray-settings")),
         MenuItem::Check {
             id: MENU_START_WITH_WINDOWS,
-            text: tr("tray-start-with-windows"),
-            checked: starts_with_windows,
+            text: tr(if startup.managed() {
+                "tray-start-with-windows-managed"
+            } else if !startup.changeable() {
+                "tray-start-with-windows-unavailable"
+            } else {
+                "tray-start-with-windows"
+            }),
+            checked: startup.enabled(),
         },
         MenuItem::Separator,
     ];
@@ -622,7 +630,14 @@ mod tests {
     #[test]
     fn the_menu_is_in_its_order() {
         let mut settings = Settings::default();
-        let off = texts(&menu_items(&settings, true, label));
+        let off = texts(&menu_items(
+            &settings,
+            StartupState {
+                per_user: Some(true),
+                machine: Some(false),
+            },
+            label,
+        ));
         assert_eq!(
             off,
             [
@@ -642,11 +657,45 @@ mod tests {
         settings.advanced.check_for_updates = true;
         settings.general.hotkey_draw.clear();
         settings.general.hotkey_capture_region.clear();
-        let on = texts(&menu_items(&settings, false, label));
+        let on = texts(&menu_items(&settings, StartupState::OFF, label));
         assert_eq!(on[0], "Draw");
         assert_eq!(on[2], "Capture a region…");
         assert_eq!(on[7], "Start with Windows");
         assert_eq!(&on[9..], ["Check for updates…", "About Overmark", "Quit"]);
+    }
+
+    #[test]
+    fn startup_menu_reports_managed_and_unavailable_sources() {
+        for state in [
+            StartupState {
+                per_user: Some(false),
+                machine: Some(true),
+            },
+            StartupState {
+                per_user: Some(true),
+                machine: Some(true),
+            },
+            StartupState::UNKNOWN,
+            StartupState {
+                per_user: Some(true),
+                machine: None,
+            },
+        ] {
+            let items = menu_items(&Settings::default(), state, label);
+            let MenuItem::Check { text, checked, .. } = &items[7] else {
+                panic!("startup item missing")
+            };
+            assert_eq!(*checked, state.enabled());
+            assert_eq!(
+                *text,
+                tr(if state.managed() {
+                    "tray-start-with-windows-managed"
+                } else {
+                    "tray-start-with-windows-unavailable"
+                })
+            );
+            assert!(!state.changeable());
+        }
     }
 
     #[test]

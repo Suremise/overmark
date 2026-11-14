@@ -1406,9 +1406,11 @@ in-process window would stay for good. The two talk through named objects in the
   keys beside it; never Ctrl+Alt); another Overmark hotkey's key is refused too.
 - **One window:** a second launch sets `Local\Overmark.SettingsShow` (or `SettingsAbout`) and the
   open window comes forward on that page.
-- **Start with Windows** is the Run value `Overmark`, the MSI's own (`autostart.rs`, Replica's
-  as it is): the only registry write in portable mode, off by default. The setting beside it
-  follows the value; Reset turns it off.
+- **Start with Windows** is the Run value `Overmark`, the MSI's own (`autostart.rs`): the only registry write in portable mode, off by default.
+  Both HKCU and HKLM are read. A matching HKLM entry is enabled and managed by the installer:
+  Settings explains it and the tray opens that explanation. Only HKCU is writable; Reset
+  reports when machine-wide startup remains on. Unreadable sources are shown as unavailable,
+  preserving any known enabled source, and cannot be edited.
 - **About** embeds `THIRD-PARTY-NOTICES.txt` (shown in rows, so 200 KB costs nothing until
   scrolled) and names the C runtime's exception.
 - **Tests** drive the window through its accessibility tree with a fake `Host` in temp folders

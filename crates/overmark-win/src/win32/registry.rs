@@ -7,8 +7,8 @@ use std::io;
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegDeleteTreeW,
-    RegGetValueW, RegSetKeyValueW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    RegDeleteKeyValueW, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW,
 };
 use windows::core::HSTRING;
 
@@ -48,12 +48,21 @@ pub fn get_dword(key: &str, value: &str) -> io::Result<Option<u32>> {
 
 /// A string value under `HKCU\<key>`, or `None` if it (or the key) isn't there.
 pub fn get_string(key: &str, value: &str) -> io::Result<Option<String>> {
+    get_string_under(HKEY_CURRENT_USER, key, value)
+}
+
+/// Reads a machine-wide string without requesting write access or elevation.
+pub fn get_machine_string(key: &str, value: &str) -> io::Result<Option<String>> {
+    get_string_under(HKEY_LOCAL_MACHINE, key, value)
+}
+
+fn get_string_under(hive: HKEY, key: &str, value: &str) -> io::Result<Option<String>> {
     let (key, value) = (HSTRING::from(key), HSTRING::from(value));
     let mut size = 0u32;
     // SAFETY: a size query: no buffer, and `size` is a live out pointer.
     let code = unsafe {
         RegGetValueW(
-            HKEY_CURRENT_USER,
+            hive,
             &key,
             &value,
             RRF_RT_REG_SZ,
@@ -71,7 +80,7 @@ pub fn get_string(key: &str, value: &str) -> io::Result<Option<String>> {
     // SAFETY: the buffer is live, writable and `bytes` long.
     let code = unsafe {
         RegGetValueW(
-            HKEY_CURRENT_USER,
+            hive,
             &key,
             &value,
             RRF_RT_REG_SZ,

@@ -180,8 +180,11 @@ fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
 struct Still(PathBuf);
 
 impl Host for Still {
-    fn autostart(&self) -> bool {
-        true
+    fn autostart(&self) -> overmark_win::autostart::StartupState {
+        overmark_win::autostart::StartupState {
+            per_user: Some(true),
+            machine: Some(false),
+        }
     }
     fn set_autostart(&self, _: bool) -> Result<(), String> {
         Ok(())

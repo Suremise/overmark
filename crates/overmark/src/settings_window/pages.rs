@@ -229,12 +229,16 @@ fn notices(app: &mut SettingsApp, ui: &mut Ui) {
 
 fn general(app: &mut SettingsApp, ui: &mut Ui) {
     plain_card(ui, None, |ui| {
-        let mut on = app.host.autostart();
+        let state = app.host.autostart();
+        let mut on = state.enabled();
         if setting_row(
             ui,
             &tr("settings-start-with-windows"),
-            Some(&tr("settings-start-with-windows-help")),
-            |ui| toggle(ui, &mut on),
+            Some(&tr(super::autostart_help(state))),
+            |ui| {
+                ui.add_enabled_ui(state.changeable(), |ui| toggle(ui, &mut on))
+                    .inner
+            },
         )
         .changed()
         {

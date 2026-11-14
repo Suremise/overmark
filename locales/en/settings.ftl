@@ -174,3 +174,6 @@ settings-no-font = Settings can't show any text: none of { $files } is in { $dir
 widget-copy-path = Copy the full path
 # A dropdown that carries its own label, closed: "Tool: Pen".
 widget-dropdown-labelled = { $label }: { $value }
+
+settings-autostart-managed = Startup is enabled for all users by the installer. Ask your administrator to change it; Reset cannot turn it off.
+settings-autostart-unavailable = Windows startup settings could not be read. No startup changes were made.
